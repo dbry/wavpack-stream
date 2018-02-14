@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
-//                           **** WAVPACK ****                            //
-//                  Hybrid Lossless Wavefile Compressor                   //
-//                Copyright (c) 1998 - 2016 David Bryant.                 //
+//                       **** WAVPACK-STREAM ****                         //
+//                      Streaming Audio Compressor                        //
+//                Copyright (c) 1998 - 2018 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -39,33 +39,13 @@ typedef __int8  int8_t;
 #include <stdint.h>
 #endif
 
-// #define LARGE_HEADER
-
 typedef int32_t (*read_stream)(void *, int32_t);
 
 ////////////////////////////// WavPack Header /////////////////////////////////
 
 // Note that this is the ONLY structure that is written to (or read from)
-// WavPack 4.0 files, and is the preamble to every block in both the .wv
-// and .wvc files.
-
-#ifdef LARGE_HEADER
-
-typedef struct {
-    char ckID [4];
-    uint32_t ckSize;
-    int16_t version;
-    unsigned char track_no, index_no;
-    uint32_t total_samples, block_index, block_samples, flags, crc;
-} WavpackHeader;
-
-#define WavpackHeaderFormat "4LS2LLLLL"
-
-#define FOURCC "wvpk"
-#define CHUNK_SIZE_OFFSET 8
-#define CHUNK_SIZE_REMAINDER (sizeof (WavpackHeader) - CHUNK_SIZE_OFFSET)
-
-#else
+// wavpack-stream files, and is the preamble to every block in both the .wps
+// and .wpsc files.
 
 typedef struct {
     char ckID [4];
@@ -78,8 +58,6 @@ typedef struct {
 #define FOURCC "wpsb"
 #define CHUNK_SIZE_OFFSET 6
 #define CHUNK_SIZE_REMAINDER (sizeof (WavpackHeader) - CHUNK_SIZE_OFFSET)
-
-#endif
 
 // or-values for "flags"
 
@@ -160,8 +138,8 @@ static void parse_wavpack_block (unsigned char *block_data);
 static int verify_wavpack_block (unsigned char *buffer);
 
 static const char *sign_on = "\n"
-" WVPARSER  WavPack Audio File Parser Test Filter  Version 1.00\n"
-" Copyright (c) 1998 - 2016 David Bryant.  All Rights Reserved.\n\n";
+" WVPARSER  WavPack Streaming Audio File Parser / Filter  Version 1.00\n"
+" Copyright (c) 1998 - 2018 David Bryant.  All Rights Reserved.\n\n";
 
 int main ()
 {
@@ -169,9 +147,7 @@ int main ()
     int channel_count, block_count;
     char flags_list [256];
     WavpackHeader wphdr;
-#ifndef LARGE_HEADER
     uint32_t block_index = 0;
-#endif
 
 #ifdef _WIN32
     setmode (fileno (stdin), O_BINARY);
@@ -206,15 +182,10 @@ int main ()
             printf ("\n");
 
 	if (wphdr.block_samples) {
-#ifdef LARGE_HEADER
-	    printf ("%s audio block, %d samples in %d bytes, time = %.2f-%.2f\n",
-                (wphdr.flags & MONO_FLAG) ? "mono" : "stereo", wphdr.block_samples, wphdr.ckSize + CHUNK_SIZE_OFFSET,
-                (double) wphdr.block_index / sample_rate, (double) (wphdr.block_index + wphdr.block_samples - 1) / sample_rate);
-#else
 	    printf ("%s audio block, %d samples in %d bytes, time = %.2f-%.2f\n",
                 (wphdr.flags & MONO_FLAG) ? "mono" : "stereo", wphdr.block_samples, wphdr.ckSize + CHUNK_SIZE_OFFSET,
                 (double) block_index / sample_rate, (double) (block_index + wphdr.block_samples - 1) / sample_rate);
-#endif
+
             // now show information from the "flags" field of the header
 
             printf ("samples are %d bits in %d bytes, shifted %d bits, sample rate = %d\n",
@@ -246,16 +217,10 @@ int main ()
                 strcat (flags_list, "none");
 
             printf ("flags: %s\n", flags_list);
-#ifndef LARGE_HEADER
             block_index += wphdr.block_samples;
-#endif
         }
         else
-#ifdef LARGE_HEADER
-            printf ("non-audio block of %d bytes, version 0x%03x\n", wphdr.ckSize + CHUNK_SIZE_OFFSET, wphdr.version);
-#else
             printf ("non-audio block of %d bytes\n", wphdr.ckSize + CHUNK_SIZE_OFFSET);
-#endif
 
 	// read and parse the actual block data (which is entirely composed of "meta" blocks)
 
@@ -268,37 +233,6 @@ int main ()
             parse_wavpack_block (block_buff);
 	    free (block_buff);
 	}
-
-	// if there's audio samples in there do some other sanity checks (especially for multichannel)
-#ifdef LARGE_HEADER
-	if (wphdr.block_samples) {
-	    if ((wphdr.flags & INITIAL_BLOCK) && wphdr.block_index != last_sample + 1)
-		printf ("error: discontinuity detected!\n");
-
-	    if (!(wphdr.flags & INITIAL_BLOCK))
-		if (first_sample != wphdr.block_index ||
-		    last_sample != wphdr.block_index + wphdr.block_samples - 1)
-			printf ("error: multichannel block mismatch detected!\n");
-
-	    last_sample = (first_sample = wphdr.block_index) + wphdr.block_samples - 1;
-
-	    if (wphdr.flags & INITIAL_BLOCK) {
-		channel_count = (wphdr.flags & MONO_FLAG) ? 1 : 2;
-		total_bytes = wphdr.ckSize + CHUNK_SIZE_OFFSET;
-		block_count = 1;
-	    }
-	    else {
-		channel_count += (wphdr.flags & MONO_FLAG) ? 1 : 2;
-		total_bytes += wphdr.ckSize + CHUNK_SIZE_OFFSET;
-		block_count++;
-
-		if (wphdr.flags & FINAL_BLOCK)
-		    printf ("multichannel: %d channels in %d blocks, %d bytes total\n",
-			channel_count, block_count, total_bytes);
-	    }
-	}
-#endif
-
     }
 
     return 0;
@@ -489,34 +423,18 @@ static uint32_t read_next_header (read_stream infile, WavpackHeader *wphdr)
 
 	sp = buffer;
 
-#ifdef LARGE_HEADER
-	if (*sp++ == FOURCC [0] && *sp == FOURCC [1] && *++sp == FOURCC [2] && *++sp == FOURCC [3] &&
-            !(*++sp & 1) && sp [2] < 16 && !sp [3] && (sp [2] || sp [1] || *sp >= 24) && sp [5] == 4 &&
-            sp [4] >= (MIN_STREAM_VERS & 0xff) && sp [4] <= (MAX_STREAM_VERS & 0xff) && sp [18] < 3 && !sp [19]) {
-		memcpy (wphdr, buffer, sizeof (*wphdr));
-		little_endian_to_native (wphdr, WavpackHeaderFormat);
-		return bytes_skipped;
-	    }
-#else
         if (*sp++ == FOURCC [0] && *sp == FOURCC [1] && *++sp == FOURCC [2] && *++sp == FOURCC [3] &&
             !(*++sp & 1) && sp [1] < 64 && sp [3] < 32) {
                 memcpy (wphdr, buffer, sizeof (*wphdr));
                 little_endian_to_native (wphdr, WavpackHeaderFormat);
                 return bytes_skipped;
             }
-#endif
-        // printf ("read_next_header() did not see valid block right away: %c %c %c %c\n", buffer [0], buffer [1], buffer [2], buffer [3]);
 
 	while (sp < ep && *sp != FOURCC [0])
 	    sp++;
 
-#ifdef LARGE_HEADER
-	if ((bytes_skipped += (uint32_t)(sp - buffer)) > 1024 * 1024)
-	    return -1;
-#else
         if ((bytes_skipped += (uint32_t)(sp - buffer)) > 1024 * 10)
             return -1;
-#endif
     }
 }
 
