@@ -116,7 +116,8 @@ static const char *help =
 "                              n = 2.0 to 23.9 bits/sample, or\n"
 "                              n = 24-9600 kbits/second (kbps)\n"
 "                              add -c to create correction file (.wpsc)\n"
-"    --blocksize=n           specify block size in samples (1 to 8000)\n"
+"    --block-samples=n       specify block size in samples (100 to 8000)\n"
+"    --block-bytes=n         specify max block size in bytes (256 to 16384)\n"
 "    -c                      hybrid lossless mode (use with -b to create\n"
 "                             correction file (.wpsc) in hybrid mode)\n"
 "    -cc                     maximum hybrid lossless compression (but degrades\n"
@@ -420,11 +421,19 @@ int main (int argc, char **argv)
                         config.qmode |= QMODE_SIGNED_BYTES;
                 }
             }
-            else if (!strncmp (long_option, "blocksize", 9)) {          // --blocksize
+            else if (!strncmp (long_option, "block-samples", 13)) {     // --block-samples
                 config.block_samples = strtol (long_param, NULL, 10);
 
-                if (config.block_samples < 1 || config.block_samples > 8000) {
-                    error_line ("invalid blocksize!");
+                if (config.block_samples < 100 || config.block_samples > 8000) {
+                    error_line ("invalid block-samples!");
+                    ++error_count;
+                }
+            }
+            else if (!strncmp (long_option, "block-bytes", 11)) {       // --block-bytes
+                config.block_bytes = strtol (long_param, NULL, 10);
+
+                if (config.block_bytes < 256 || config.block_bytes > 16384) {
+                    error_line ("invalid block-bytes!");
                     ++error_count;
                 }
             }
