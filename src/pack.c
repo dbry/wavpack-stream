@@ -515,6 +515,7 @@ static void scan_int32_quick (WavpackStream *wps, int32_t *values, int32_t num_v
 static void send_int32_data (WavpackStream *wps, int32_t *values, int32_t num_values);
 static int pack_samples (WavpackContext *wpc, int32_t *buffer);
 static void bs_open_write (Bitstream *bs, void *buffer_start, void *buffer_end);
+static uint32_t bs_remain_write (Bitstream *bs);
 static uint32_t bs_close_write (Bitstream *bs);
 
 int pack_block (WavpackContext *wpc, int32_t *buffer)
@@ -534,7 +535,10 @@ int pack_block (WavpackContext *wpc, int32_t *buffer)
     if (!wpc->current_stream && !(flags & FLOAT_DATA) && (flags & MAG_MASK) >> MAG_LSB < 24) {
         if ((wpc->config.flags & CONFIG_DYNAMIC_SHAPING) && !wpc->config.block_samples) {
             dynamic_noise_shaping (wpc, buffer, TRUE);
-            sample_count = wps->wphdr.block_samples;
+
+            if (sample_count != wps->wphdr.block_samples)
+                sample_count = wps->wphdr.block_samples;
+
             dynamic_shaping_done = TRUE;
         }
     }
@@ -691,6 +695,9 @@ int pack_block (WavpackContext *wpc, int32_t *buffer)
     }
     else
         wps->wphdr.flags = sflags;
+
+    if (sample_count != wps->wphdr.block_samples)
+        sample_count = wps->wphdr.block_samples;
 
     // potentially move any unused dynamic noise shaping profile data to use next time
 
@@ -1034,7 +1041,7 @@ static int pack_samples (WavpackContext *wpc, int32_t *buffer)
 
     crc = crc2 = 0xffffffff;
 
-    if (!(flags & HYBRID_FLAG) && (flags & MONO_DATA)) {
+    if (!(flags & HYBRID_FLAG) && (flags & MONO_DATA) && !wpc->block_trigger) {
         int32_t *eptr = buffer + sample_count;
 
         for (bptr = buffer; bptr < eptr;)
@@ -1043,7 +1050,7 @@ static int pack_samples (WavpackContext *wpc, int32_t *buffer)
         if (wps->num_passes)
             execute_mono (wpc, buffer, !wps->num_terms, 1);
     }
-    else if (!(flags & HYBRID_FLAG) && !(flags & MONO_DATA)) {
+    else if (!(flags & HYBRID_FLAG) && !(flags & MONO_DATA) && !wpc->block_trigger) {
         int32_t *eptr = buffer + (sample_count * 2);
 
         for (bptr = buffer; bptr < eptr; bptr += 2)
@@ -1146,18 +1153,55 @@ static int pack_samples (WavpackContext *wpc, int32_t *buffer)
 
         /////////////////////// handle lossless mono mode /////////////////////////
 
-        if (!(flags & HYBRID_FLAG) && (flags & MONO_DATA)) {
+        if (!(flags & HYBRID_FLAG) && (flags & MONO_DATA) && !wpc->block_trigger) {
             if (!wps->num_passes) {
                 max_magnitude = DECORR_MONO_BUFFER (buffer, wps->decorr_passes, wps->num_terms, sample_count);
                 m = sample_count & (MAX_TERM - 1);
             }
 
             send_words_lossless (wps, buffer, sample_count);
+            i = sample_count;
+        }
+        else if (!(flags & HYBRID_FLAG) && (flags & MONO_DATA) && wpc->block_trigger) {
+
+            for (bptr = buffer, i = 0; i < sample_count; ++i) {
+                int32_t code;
+
+                if (bs_remain_write (&wps->wvbits) < wpc->block_trigger)
+                    break;
+
+                crc = crc * 3 + (code = *bptr++);
+
+                for (tcount = wps->num_terms, dpp = wps->decorr_passes; tcount--; dpp++) {
+                    int32_t sam;
+
+                    if (dpp->term > MAX_TERM) {
+                        if (dpp->term & 1)
+                            sam = 2 * dpp->samples_A [0] - dpp->samples_A [1];
+                        else
+                            sam = (3 * dpp->samples_A [0] - dpp->samples_A [1]) >> 1;
+
+                        dpp->samples_A [1] = dpp->samples_A [0];
+                        dpp->samples_A [0] = code;
+                    }
+                    else {
+                        sam = dpp->samples_A [m];
+                        dpp->samples_A [(m + dpp->term) & (MAX_TERM - 1)] = code;
+                    }
+
+                    code -= apply_weight (dpp->weight_A, sam);
+                    update_weight (dpp->weight_A, dpp->delta, sam, code);
+                }
+
+                m = (m + 1) & (MAX_TERM - 1);
+                max_magnitude |= (code < 0 ? ~code : code);
+                send_word (wps, code, 0);
+            }
         }
 
         //////////////////// handle the lossless stereo mode //////////////////////
 
-        else if (!(flags & HYBRID_FLAG) && !(flags & MONO_DATA)) {
+        else if (!(flags & HYBRID_FLAG) && !(flags & MONO_DATA) && !wpc->block_trigger) {
             if (!wps->num_passes) {
                 if (flags & JOINT_STEREO) {
                     int32_t *eptr = buffer + (sample_count * 2);
@@ -1176,6 +1220,69 @@ static int pack_samples (WavpackContext *wpc, int32_t *buffer)
             }
 
             send_words_lossless (wps, buffer, sample_count);
+            i = sample_count;
+        }
+        else if (!(flags & HYBRID_FLAG) && !(flags & MONO_DATA) && wpc->block_trigger) {
+            for (bptr = buffer, i = 0; i < sample_count; ++i) {
+                int32_t left, right, sam_A, sam_B;
+
+                if (bs_remain_write (&wps->wvbits) < wpc->block_trigger)
+                    break;
+
+                crc = crc * 3 + (left = *bptr++);
+                crc = crc * 3 + (right = *bptr++);
+
+                if (flags & JOINT_STEREO)
+                    right += ((left -= right) >> 1);
+
+                for (tcount = wps->num_terms, dpp = wps->decorr_passes; tcount-- ; dpp++) {
+                    if (dpp->term > 0) {
+                        if (dpp->term > MAX_TERM) {
+                            if (dpp->term & 1) {
+                                sam_A = 2 * dpp->samples_A [0] - dpp->samples_A [1];
+                                sam_B = 2 * dpp->samples_B [0] - dpp->samples_B [1];
+                            }
+                            else {
+                                sam_A = (3 * dpp->samples_A [0] - dpp->samples_A [1]) >> 1;
+                                sam_B = (3 * dpp->samples_B [0] - dpp->samples_B [1]) >> 1;
+                            }
+
+                            dpp->samples_A [1] = dpp->samples_A [0];
+                            dpp->samples_B [1] = dpp->samples_B [0];
+                            dpp->samples_A [0] = left;
+                            dpp->samples_B [0] = right;
+                        }
+                        else {
+                            int k = (m + dpp->term) & (MAX_TERM - 1);
+
+                            sam_A = dpp->samples_A [m];
+                            sam_B = dpp->samples_B [m];
+                            dpp->samples_A [k] = left;
+                            dpp->samples_B [k] = right;
+                        }
+
+                        left -= apply_weight (dpp->weight_A, sam_A);
+                        right -= apply_weight (dpp->weight_B, sam_B);
+                        update_weight (dpp->weight_A, dpp->delta, sam_A, left);
+                        update_weight (dpp->weight_B, dpp->delta, sam_B, right);
+                    }
+                    else {
+                        sam_A = (dpp->term == -2) ? right : dpp->samples_A [0];
+                        sam_B = (dpp->term == -1) ? left : dpp->samples_B [0];
+                        dpp->samples_A [0] = right;
+                        dpp->samples_B [0] = left;
+                        left -= apply_weight (dpp->weight_A, sam_A);
+                        right -= apply_weight (dpp->weight_B, sam_B);
+                        update_weight_clip (dpp->weight_A, dpp->delta, sam_A, left);
+                        update_weight_clip (dpp->weight_B, dpp->delta, sam_B, right);
+                    }
+                }
+
+                m = (m + 1) & (MAX_TERM - 1);
+                max_magnitude |= (left < 0 ? ~left : left) | (right < 0 ? ~right : right);
+                send_word (wps, left, 0);
+                send_word (wps, right, 1);
+            }
         }
 
         /////////////////// handle the lossy/hybrid mono mode /////////////////////
@@ -1184,6 +1291,10 @@ static int pack_samples (WavpackContext *wpc, int32_t *buffer)
             for (bptr = buffer, i = 0; i < sample_count; ++i) {
                 int32_t code, temp;
                 int shaping_weight;
+
+                if (wpc->block_trigger && (bs_remain_write (&wps->wvbits) < wpc->block_trigger ||
+                    (wpc->wvc_flag && bs_remain_write (&wps->wvcbits) < wpc->block_trigger)))
+                        break;
 
                 crc2 += (crc2 << 1) + (code = *bptr++);
 
@@ -1258,6 +1369,10 @@ static int pack_samples (WavpackContext *wpc, int32_t *buffer)
             for (bptr = buffer, i = 0; i < sample_count; ++i) {
                 int32_t left, right, temp;
                 int shaping_weight;
+
+                if (wpc->block_trigger && (bs_remain_write (&wps->wvbits) < wpc->block_trigger ||
+                    (wpc->wvc_flag && bs_remain_write (&wps->wvcbits) < wpc->block_trigger)))
+                        break;
 
                 left = *bptr++;
                 crc2 += (crc2 << 3) + (left << 1) + left + (right = *bptr++);
@@ -1405,6 +1520,13 @@ static int pack_samples (WavpackContext *wpc, int32_t *buffer)
                     }
                 }
 
+        if (i != sample_count) {
+            ((WavpackHeader *) wps->blockbuff)->block_samples = sample_count = wps->wphdr.block_samples = i;
+
+            if (wpc->wvc_flag)
+                ((WavpackHeader *) wps->block2buff)->block_samples = sample_count;
+        }
+
         if (wpc->config.flags & CONFIG_CALC_NOISE)
             wps->dc.noise_sum += noise_acc;
 
@@ -1475,11 +1597,12 @@ static int pack_samples (WavpackContext *wpc, int32_t *buffer)
             *wps = saved_stream;
             wps->num_terms = REPACK_SAFE_NUM_TERMS;
             memcpy (wps->blockbuff, &wps->wphdr, sizeof (WavpackHeader));
+            sample_count = wps->wphdr.block_samples;
 
             if (saved_buffer)
                 memcpy (buffer, saved_buffer, sample_count * sizeof (int32_t) * (flags & MONO_DATA ? 1 : 2));
 
-            if (flags & HYBRID_FLAG)
+            if ((flags & HYBRID_FLAG) || wpc->block_trigger)
                 crc = crc2 = 0xffffffff;
         }
         else {
@@ -1735,6 +1858,17 @@ static void bs_write (Bitstream *bs)
 {
     bs->ptr = bs->buf;
     bs->error = 1;
+}
+
+// This function calculates the approximate number of bytes remaining in the
+// bitstream buffer and can be used as an early-warning of an impending overflow.
+
+static uint32_t bs_remain_write (Bitstream *bs)
+{
+    if (bs->error)
+        return (uint32_t) -1;
+
+    return (bs->end - bs->ptr) * sizeof (*bs->ptr);
 }
 
 // This function forces a flushing write of the specified BitStream, and

@@ -216,6 +216,11 @@ int WavpackStreamSetConfiguration64 (WavpackContext *wpc, WavpackStreamConfig *c
             return FALSE;
         }
 
+        if (config->block_bytes) {
+            strcpy (wpc->error_message, "block-bytes not available for DSD!");
+            return FALSE;
+        }
+
         // with DSD, very few PCM options work (or make sense), so only allow those that do
         config->flags &= (CONFIG_HIGH_FLAG | CONFIG_MD5_CHECKSUM | CONFIG_PAIR_UNDEF_CHANS);
         config->float_norm_exp = config->xmode = 0;
@@ -234,6 +239,7 @@ int WavpackStreamSetConfiguration64 (WavpackContext *wpc, WavpackStreamConfig *c
     wpc->config.bits_per_sample = config->bits_per_sample;
     wpc->config.bytes_per_sample = config->bytes_per_sample;
     wpc->config.block_samples = config->block_samples;
+    wpc->config.block_bytes = config->block_bytes;
     wpc->config.flags = config->flags;
     wpc->config.qmode = config->qmode;
 
@@ -256,6 +262,11 @@ int WavpackStreamSetConfiguration64 (WavpackContext *wpc, WavpackStreamConfig *c
         }
         else
             flags |= ((config->bytes_per_sample * 8) - config->bits_per_sample) << SHIFT_LSB;
+
+        if (config->block_bytes && (config->float_norm_exp || config->bits_per_sample > 24)) {
+            strcpy (wpc->error_message, "block-bytes not available for > 24-bit audio!");
+            return FALSE;
+        }
 
         if (config->flags & CONFIG_HYBRID_FLAG) {
             flags |= HYBRID_FLAG | HYBRID_BITRATE | HYBRID_BALANCE;
@@ -407,13 +418,24 @@ int WavpackStreamSetConfiguration64 (WavpackContext *wpc, WavpackStreamConfig *c
     wpc->num_streams = wpc->current_stream;
     wpc->current_stream = 0;
 
+    if (config->block_bytes && wpc->num_streams > 1) {
+        strcpy (wpc->error_message, "block-bytes not available for multichannel!");
+        return FALSE;
+    }
+
     if (num_chans) {
         strcpy (wpc->error_message, "too many channels!");
         return FALSE;
     }
 
-    if (config->flags & CONFIG_EXTRA_MODE)
+    if (config->flags & CONFIG_EXTRA_MODE) {
+        if (config->block_bytes) {
+            strcpy (wpc->error_message, "block-bytes not available with extra mode!");
+            return FALSE;
+        }
+
         wpc->config.xmode = config->xmode ? config->xmode : 1;
+    }
 
     return TRUE;
 }
@@ -755,8 +777,22 @@ static int pack_streams (WavpackContext *wpc, uint32_t block_samples)
 
     max_blocksize += wpc->metabytes + 1024;     // finally, add metadata & another 1K margin
 
-    if (max_blocksize >= 16384)                 // limit blocks to 16K for now (somewhat arbitrary)
-        max_blocksize = 16384;
+    if (max_blocksize > 16384 || (wpc->config.block_bytes && wpc->config.block_bytes < max_blocksize)) {
+        if (wpc->config.block_bytes && wpc->config.block_bytes < max_blocksize)
+            max_blocksize = wpc->config.block_bytes;
+        else
+            max_blocksize = 16384;
+
+        if (wpc->num_streams == 1 && !wpc->config.float_norm_exp && wpc->config.bits_per_sample <= 24 && !wpc->config.xmode) {
+            wpc->block_trigger = (wpc->streams [0]->wphdr.flags & MONO_FLAG) ? 24 : 32;
+
+            if (BLOCK_CHECKSUM_BYTES)
+                wpc->block_trigger += BLOCK_CHECKSUM_BYTES + 2;
+
+            if (AUDIO_CHECKSUM_BYTES)
+                wpc->block_trigger += AUDIO_CHECKSUM_BYTES + 2;
+        }
+    }
 
     out2buff = (wpc->wvc_flag) ? malloc (max_blocksize) : NULL;
     out2end = out2buff + max_blocksize;
@@ -766,6 +802,12 @@ static int pack_streams (WavpackContext *wpc, uint32_t block_samples)
     for (wpc->current_stream = 0; wpc->current_stream < wpc->num_streams; wpc->current_stream++) {
         WavpackStream *wps = wpc->streams [wpc->current_stream];
         uint32_t flags = wps->wphdr.flags;
+        int32_t *backup_buffer = NULL;
+
+        if (!wpc->current_stream && wpc->block_trigger) {
+            backup_buffer = malloc (block_samples * (flags & MONO_FLAG ? 1 : 2) * sizeof (int32_t));
+            memcpy (backup_buffer, wps->sample_buffer, block_samples * (flags & MONO_FLAG ? 1 : 2) * sizeof (int32_t));
+        }
 
         flags &= ~MAG_MASK;
         flags += (1 << MAG_LSB) * ((flags & BYTES_STORED) * 8 + 7);
@@ -828,8 +870,12 @@ static int pack_streams (WavpackContext *wpc, uint32_t block_samples)
         }
 
         if (wpc->acc_samples != block_samples)
-            memmove (wps->sample_buffer, wps->sample_buffer + block_samples * (flags & MONO_FLAG ? 1 : 2),
+            memmove (wps->sample_buffer,
+                (backup_buffer ? backup_buffer : wps->sample_buffer) + block_samples * (flags & MONO_FLAG ? 1 : 2),
                 (wpc->acc_samples - block_samples) * sizeof (int32_t) * (flags & MONO_FLAG ? 1 : 2));
+
+        if (backup_buffer)
+            free (backup_buffer);
     }
 
     wpc->current_stream = 0;

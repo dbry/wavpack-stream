@@ -192,7 +192,7 @@ typedef struct {
     float bitrate, shaping_weight;
     int bits_per_sample, bytes_per_sample;
     int qmode, flags, xmode, num_channels, float_norm_exp;
-    int32_t block_samples, extra_flags, sample_rate, channel_mask;
+    int32_t block_samples, block_bytes, extra_flags, sample_rate, channel_mask;
     unsigned char md5_checksum [16], md5_read;
 } WavpackStreamConfig;
 
@@ -416,7 +416,7 @@ typedef struct {
     int64_t filelen, file2len, filepos, file2pos, total_samples, initial_index;
     uint32_t crc_errors, first_flags;
     int wvc_flag, open_flags, norm_offset, reduced_channels, lossy_blocks, version_five;
-    uint32_t block_samples, ave_block_samples, acc_samples, riff_trailer_bytes;
+    uint32_t block_samples, ave_block_samples, acc_samples, riff_trailer_bytes, block_trigger;
     int riff_header_added, riff_header_created;
 
     int current_stream, num_streams, max_streams;
