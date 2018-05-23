@@ -232,6 +232,7 @@ int WavpackStreamStoreMD5Sum (WavpackContext *wpc, unsigned char data [16]);
 int WavpackStreamPackInit (WavpackContext *wpc);
 int WavpackStreamPackSamples (WavpackContext *wpc, int32_t *sample_buffer, uint32_t sample_count);
 int WavpackStreamFlushSamples (WavpackContext *wpc);
+void WavpackStreamDiscardSamples (WavpackContext *wpc);
 void WavpackStreamUpdateNumSamples (WavpackContext *wpc, void *first_block);
 void *WavpackStreamGetWrapperLocation (void *first_block, uint32_t *size);
 double WavpackStreamGetEncodedNoise (WavpackContext *wpc, double *peak);

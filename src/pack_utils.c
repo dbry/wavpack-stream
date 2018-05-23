@@ -699,6 +699,17 @@ int WavpackStreamFlushSamples (WavpackContext *wpc)
     return TRUE;
 }
 
+// Discard all samples accumulated by WavpackStreamPackSamples() without encoding
+// them into WavPack blocks. Obviously this has no effect on audio data that has
+// already been encoded and sent to the write callback and is really only useful
+// for deleting the samples left over after a block was truncated early with the
+// block-bytes option. All other enocoding state information is retained.
+
+void WavpackStreamDiscardSamples (WavpackContext *wpc)
+{
+    wpc->acc_samples = 0;
+}
+
 // Note: The following function is no longer required because a proper wav
 // header is now automatically generated for the application. However, if the
 // application wants to generate its own header or wants to include additional
