@@ -1885,7 +1885,7 @@ static int pack_audio (WavpackContext *wpc, FILE *infile, int qmode, unsigned ch
         input_samples >>= 1;
 
     if (md5_digest_source)
-        MD5Init (&md5_context);
+        MD5_Init (&md5_context);
 
     WavpackStreamPackInit (wpc);
     bytes_per_sample = WavpackStreamGetBytesPerSample (wpc) * WavpackStreamGetNumChannels (wpc);
@@ -1925,7 +1925,7 @@ static int pack_audio (WavpackContext *wpc, FILE *infile, int qmode, unsigned ch
                 sample_count, WavpackStreamGetBytesPerSample (wpc));
 
         if (md5_digest_source && quantize_bit_mask == 0)
-            MD5Update (&md5_context, input_buffer, sample_count * bytes_per_sample);
+            MD5_Update (&md5_context, input_buffer, sample_count * bytes_per_sample);
 
         // if we have reordering to do because this is a CAF channel layout that is not in Microsoft
         // order, then we do the reordering AFTER the MD5 because we will be unreordering them at
@@ -1966,7 +1966,7 @@ static int pack_audio (WavpackContext *wpc, FILE *infile, int qmode, unsigned ch
 
                 if (md5_digest_source) {
                     store_samples (input_buffer, sample_buffer, qmode, bps, sample_count * WavpackStreamGetNumChannels (wpc));
-                    MD5Update (&md5_context, input_buffer, WavpackStreamGetBytesPerSample (wpc) * l);
+                    MD5_Update (&md5_context, input_buffer, WavpackStreamGetBytesPerSample (wpc) * l);
                 }
             }
         }
@@ -2014,7 +2014,7 @@ static int pack_audio (WavpackContext *wpc, FILE *infile, int qmode, unsigned ch
     }
 
     if (md5_digest_source)
-        MD5Final (md5_digest_source, &md5_context);
+        MD5_Final (md5_digest_source, &md5_context);
 
     return WAVPACK_NO_ERROR;
 }
@@ -2050,7 +2050,7 @@ static int pack_dsd_audio (WavpackContext *wpc, FILE *infile, int qmode, unsigne
     MD5_CTX md5_context;
 
     if (md5_digest_source)
-        MD5Init (&md5_context);
+        MD5_Init (&md5_context);
 
     WavpackStreamPackInit (wpc);
     num_channels = WavpackStreamGetNumChannels (wpc);
@@ -2097,7 +2097,7 @@ static int pack_dsd_audio (WavpackContext *wpc, FILE *infile, int qmode, unsigne
         }
 
         if (md5_digest_source)
-            MD5Update (&md5_context, input_buffer, bytes_read);
+            MD5_Update (&md5_context, input_buffer, bytes_read);
 
         if (!sample_count)
             break;
@@ -2172,7 +2172,7 @@ static int pack_dsd_audio (WavpackContext *wpc, FILE *infile, int qmode, unsigne
     }
 
     if (md5_digest_source)
-        MD5Final (md5_digest_source, &md5_context);
+        MD5_Final (md5_digest_source, &md5_context);
 
     return WAVPACK_NO_ERROR;
 }
@@ -2736,7 +2736,7 @@ static int repack_audio (WavpackContext *outfile, WavpackContext *infile, unsign
 
     if (md5_digest_source) {
         format_buffer = malloc (input_samples * bps * WavpackStreamGetNumChannels (outfile));
-        MD5Init (&md5_context);
+        MD5_Init (&md5_context);
 
         if (qmode & QMODE_REORDERED_CHANS) {
             int layout = WavpackStreamGetChannelLayout (infile, NULL), i;
@@ -2833,7 +2833,7 @@ static int repack_audio (WavpackContext *outfile, WavpackContext *infile, unsign
             else
                 store_samples (format_buffer, sample_buffer, qmode, bps, sample_count * num_channels);
 
-            MD5Update (&md5_context, format_buffer, bps * sample_count * num_channels);
+            MD5_Update (&md5_context, format_buffer, bps * sample_count * num_channels);
         }
 
         if (check_break ()) {
@@ -2873,7 +2873,7 @@ static int repack_audio (WavpackContext *outfile, WavpackContext *infile, unsign
     }
 
     if (md5_digest_source) {
-        MD5Final (md5_digest_source, &md5_context);
+        MD5_Final (md5_digest_source, &md5_context);
         free (format_buffer);
     }
 
@@ -2965,7 +2965,7 @@ static int verify_audio (char *infilename, unsigned char *md5_digest_source)
     }
 
     if (md5_digest_source)
-        MD5Init (&md5_context);
+        MD5_Init (&md5_context);
 
     qmode = WavpackStreamGetQualifyMode (wpc);
     num_channels = WavpackStreamGetNumChannels (wpc);
@@ -3025,12 +3025,12 @@ static int verify_audio (char *infilename, unsigned char *md5_digest_source)
                             *dptr++ = *sptr++;
                     }
 
-                    MD5Update (&md5_context, dsd_buffer, samples_unpacked * num_channels);
+                    MD5_Update (&md5_context, dsd_buffer, samples_unpacked * num_channels);
                     free (dsd_buffer);
                 }
                 else {
                     store_samples (temp_buffer, temp_buffer, qmode, bps, samples_unpacked * num_channels);
-                    MD5Update (&md5_context, (unsigned char *) temp_buffer, bps * samples_unpacked * num_channels);
+                    MD5_Update (&md5_context, (unsigned char *) temp_buffer, bps * samples_unpacked * num_channels);
                 }
             }
         }
@@ -3072,7 +3072,7 @@ static int verify_audio (char *infilename, unsigned char *md5_digest_source)
     // definitive verification.
 
     if (result == WAVPACK_NO_ERROR && md5_digest_source) {
-        MD5Final (md5_digest_result, &md5_context);
+        MD5_Final (md5_digest_result, &md5_context);
 
         if (memcmp (md5_digest_result, md5_digest_source, 16)) {
             char md5_string1 [] = "00000000000000000000000000000000";

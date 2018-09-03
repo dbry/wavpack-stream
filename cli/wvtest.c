@@ -454,7 +454,7 @@ static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans
         strcat (mode_string, "hh");
 
     printf ("test %04d...", ++test_number); fflush (stdout);
-    MD5Init (&md5_context);
+    MD5_Init (&md5_context);
 
     noise_generator_init (&generators [0], 128.0);
     tone_generator_init (&generators [1], SAMPLE_RATE, 20, 200);
@@ -663,7 +663,7 @@ static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans
 
 	WavpackStreamPackSamples (out_wpc, (int32_t *) destin, ENCODE_SAMPLES);
         store_samples (destin, (int32_t *) destin, 0, wpconfig.bytes_per_sample, ENCODE_SAMPLES * num_chans);
-        MD5Update (&md5_context, (unsigned char *) destin, wpconfig.bytes_per_sample * ENCODE_SAMPLES * num_chans);
+        MD5_Update (&md5_context, (unsigned char *) destin, wpconfig.bytes_per_sample * ENCODE_SAMPLES * num_chans);
 
         sequencing_angle += 2.0 * M_PI / SAMPLE_RATE / speed * ENCODE_SAMPLES;
         if (sequencing_angle > M_PI) sequencing_angle -= M_PI * 2.0;
@@ -689,7 +689,7 @@ static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans
     }
 
     WavpackStreamFlushSamples (out_wpc);
-    MD5Final (md5_encoded, &md5_context);
+    MD5_Final (md5_encoded, &md5_context);
 
     if (wpconfig.flags & CONFIG_MD5_CHECKSUM) {
         WavpackStreamStoreMD5Sum (out_wpc, md5_encoded);
@@ -768,7 +768,7 @@ static void *decode_thread (void *threadid)
         pthread_exit (NULL);
     }
 
-    MD5Init (&md5_context);
+    MD5_Init (&md5_context);
     num_chans = WavpackStreamGetNumChannels (wpc);
     bps = WavpackStreamGetBytesPerSample (wpc);
 
@@ -786,11 +786,11 @@ static void *decode_thread (void *threadid)
             break;
 
         store_samples (decoded_samples, decoded_samples, 0, bps, samples * num_chans);
-        MD5Update (&md5_context, (unsigned char *) decoded_samples, bps * samples * num_chans);
+        MD5_Update (&md5_context, (unsigned char *) decoded_samples, bps * samples * num_chans);
         wd->sample_count += samples;
     }
 
-    MD5Final (wd->md5_decoded, &md5_context);
+    MD5_Final (wd->md5_decoded, &md5_context);
     wd->num_errors = WavpackStreamGetNumErrors (wpc);
     free (decoded_samples);
     WavpackStreamCloseFile (wpc);

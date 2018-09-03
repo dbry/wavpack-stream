@@ -1436,7 +1436,7 @@ static int unpack_audio (WavpackContext *wpc, FILE *outfile, int qmode, unsigned
     MD5_CTX md5_context;
 
     if (md5_digest)
-        MD5Init (&md5_context);
+        MD5_Init (&md5_context);
 
     if (outfile) {
         if (outbuf_k)
@@ -1508,7 +1508,7 @@ static int unpack_audio (WavpackContext *wpc, FILE *outfile, int qmode, unsigned
 
         if (md5_digest && samples_unpacked) {
             store_samples (temp_buffer, temp_buffer, qmode, bps, samples_unpacked * num_channels);
-            MD5Update (&md5_context, (unsigned char *) temp_buffer, bps * samples_unpacked * num_channels);
+            MD5_Update (&md5_context, (unsigned char *) temp_buffer, bps * samples_unpacked * num_channels);
         }
 
         if (!samples_unpacked)
@@ -1546,7 +1546,7 @@ static int unpack_audio (WavpackContext *wpc, FILE *outfile, int qmode, unsigned
         free (new_channel_order);
 
     if (md5_digest)
-        MD5Final (md5_digest, &md5_context);
+        MD5_Final (md5_digest, &md5_context);
 
     free (temp_buffer);
 
@@ -1589,7 +1589,7 @@ static int unpack_dsd_audio (WavpackContext *wpc, FILE *outfile, int qmode, unsi
     MD5_CTX md5_context;
 
     if (md5_digest)
-        MD5Init (&md5_context);
+        MD5_Init (&md5_context);
 
     output_buffer_size = DSD_BLOCKSIZE * num_channels;
     output_buffer = malloc (output_buffer_size);
@@ -1656,7 +1656,7 @@ static int unpack_dsd_audio (WavpackContext *wpc, FILE *outfile, int qmode, unsi
             }
 
             if (md5_digest)
-                MD5Update (&md5_context, output_buffer, samples_unpacked * num_channels);
+                MD5_Update (&md5_context, output_buffer, samples_unpacked * num_channels);
 
             if (outfile && (!DoWriteFile (outfile, output_buffer, samples_unpacked * num_channels, &bcount) ||
                 bcount != samples_unpacked * num_channels)) {
@@ -1701,7 +1701,7 @@ static int unpack_dsd_audio (WavpackContext *wpc, FILE *outfile, int qmode, unsi
         free (new_channel_order);
 
     if (md5_digest)
-        MD5Final (md5_digest, &md5_context);
+        MD5_Final (md5_digest, &md5_context);
 
     free (temp_buffer);
 
