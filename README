@@ -86,6 +86,16 @@ Notes:
    way) and reconstructed for decoding, thereby further reducing the block
    overhead.
 
+   For version 0.2.0 I have added the option to have the wavpack-stream blocks
+   terminate at a specfied byte size limit rather than have a fixed number of
+   samples per block. This might be useful in networking environments where
+   there is a maximum (or perhaps an optimum) packet size. Obviously this will
+   result in a widely varying number of blocks per second (as opposed to the
+   widely varying block size in the regular mode). This mode does not work
+   with 32-bit audio (neither floating-point nor integer), multichannel, nor
+   the "extra" processing modes. It is possible to experiment with this using
+   the new "--block-bytes" option in the demo wavpack-stream program.
+
    The descriptions referenced below refer to the regular libwavpack,
    but most of the material is applicable to this version.
 
