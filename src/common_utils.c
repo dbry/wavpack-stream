@@ -361,6 +361,19 @@ WavpackContext *WavpackStreamCloseFile (WavpackContext *wpc)
 
     WavpackStreamFreeWrapper (wpc);
 
+    if (wpc->metadata) {
+        int i;
+
+        for (i = 0; i < wpc->metacount; ++i)
+            if (wpc->metadata [i].data)
+                free (wpc->metadata [i].data);
+
+        free (wpc->metadata);
+    }
+
+    if (wpc->channel_identities)
+        free (wpc->channel_identities);
+
     if (wpc->channel_reordering)
         free (wpc->channel_reordering);
 
