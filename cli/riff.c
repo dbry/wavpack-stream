@@ -77,7 +77,7 @@ extern int debug_logging_mode;
 
 int ParseRiffHeaderConfig (FILE *infile, char *infilename, char *fourcc, WavpackContext *wpc, WavpackStreamConfig *config)
 {
-    int is_rf64 = !strncmp (fourcc, "RF64", 4), got_ds64 = 0;
+    int is_rf64 = !strncmp (fourcc, "RF64", 4), got_ds64 = 0, format_chunk = 0;
     int64_t total_samples = 0, infilesize;
     RiffChunkHeader riff_chunk_header;
     ChunkHeader chunk_header;
@@ -163,6 +163,11 @@ int ParseRiffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpack
         }
         else if (!strncmp (chunk_header.ckID, "fmt ", 4)) {     // if it's the format chunk, we want to get some info out of there and
             int supported = TRUE, format;                        // make sure it's a .wav file we can handle
+
+            if (format_chunk++) {
+                error_line ("%s is not a valid .WAV file!", infilename);
+                return WAVPACK_SOFT_ERROR;
+            }
 
             if (chunk_header.ckSize < 16 || chunk_header.ckSize > sizeof (WaveHeader) ||
                 !DoReadFile (infile, &WaveHeader, chunk_header.ckSize, &bcount) ||
@@ -310,7 +315,14 @@ int ParseRiffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpack
         else {          // just copy unknown chunks to output file
 
             int bytes_to_copy = (chunk_header.ckSize + 1) & ~1L;
-            char *buff = malloc (bytes_to_copy);
+            char *buff;
+
+            if (bytes_to_copy < 0 || bytes_to_copy > 4194304) {
+                error_line ("%s is not a valid .WAV file!", infilename);
+                return WAVPACK_SOFT_ERROR;
+            }
+
+            buff = malloc (bytes_to_copy);
 
             if (debug_logging_mode)
                 error_line ("extra unknown chunk \"%c%c%c%c\" of %d bytes",

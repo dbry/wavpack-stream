@@ -78,6 +78,7 @@ int ParseWave64HeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpa
     Wave64ChunkHeader chunk_header;
     Wave64FileHeader filehdr;
     WaveHeader WaveHeader;
+    int format_chunk = 0;
     uint32_t bcount;
 
     infilesize = DoGetFileSize (infile);
@@ -128,6 +129,11 @@ int ParseWave64HeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpa
 
         if (!memcmp (chunk_header.ckID, fmt_guid, sizeof (fmt_guid))) {
             int supported = TRUE, format;
+
+            if (format_chunk++) {
+                error_line ("%s is not a valid .W64 file!", infilename);
+                return WAVPACK_SOFT_ERROR;
+            }
 
             chunk_header.ckSize = (chunk_header.ckSize + 7) & ~7L;
 
@@ -266,7 +272,14 @@ int ParseWave64HeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpa
         }
         else {          // just copy unknown chunks to output file
             int bytes_to_copy = (chunk_header.ckSize + 7) & ~7L;
-            char *buff = malloc (bytes_to_copy);
+            char *buff;
+
+            if (bytes_to_copy < 0 || bytes_to_copy > 4194304) {
+                error_line ("%s is not a valid .W64 file!", infilename);
+                return WAVPACK_SOFT_ERROR;
+            }
+
+            buff = malloc (bytes_to_copy);
 
             if (debug_logging_mode)
                 error_line ("extra unknown chunk \"%c%c%c%c\" of %d bytes",

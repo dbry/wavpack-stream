@@ -153,7 +153,17 @@ int ParseDsdiffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpa
                 error_line ("dsdiff file version = 0x%08x", version);
         }
         else if (!strncmp (dff_chunk_header.ckID, "PROP", 4)) {
-            char *prop_chunk = malloc ((size_t) dff_chunk_header.ckDataSize);
+            char *prop_chunk;
+
+            if (dff_chunk_header.ckDataSize < 4 || dff_chunk_header.ckDataSize > 1024) {
+                error_line ("%s is not a valid .DFF file!", infilename);
+                return WAVPACK_SOFT_ERROR;
+            }
+
+            if (debug_logging_mode)
+                error_line ("got PROP chunk of %d bytes total", (int) dff_chunk_header.ckDataSize);
+
+            prop_chunk = malloc ((size_t) dff_chunk_header.ckDataSize);
 
             if (!DoReadFile (infile, prop_chunk, (uint32_t) dff_chunk_header.ckDataSize, &bcount) ||
                 bcount != dff_chunk_header.ckDataSize) {
@@ -178,7 +188,7 @@ int ParseDsdiffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpa
                     cptr += sizeof (dff_chunk_header);
                     WavpackStreamBigEndianToNative (&dff_chunk_header, DFFChunkHeaderFormat);
 
-                    if (eptr - cptr >= dff_chunk_header.ckDataSize) {
+                    if (dff_chunk_header.ckDataSize > 0 && dff_chunk_header.ckDataSize <= eptr - cptr) {
                         if (!strncmp (dff_chunk_header.ckID, "FS  ", 4) && dff_chunk_header.ckDataSize == 4) {
                             memcpy (&sampleRate, cptr, sizeof (sampleRate));
                             WavpackStreamBigEndianToNative (&sampleRate, "L");
@@ -193,6 +203,12 @@ int ParseDsdiffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpa
                             cptr += sizeof (numChannels);
 
                             chansSpecified = (int)(dff_chunk_header.ckDataSize - sizeof (numChannels)) / 4;
+
+                            if (numChannels < chansSpecified || numChannels < 1) {
+                                error_line ("%s is not a valid .DFF file!", infilename);
+                                free (prop_chunk);
+                                return WAVPACK_SOFT_ERROR;
+                            }
 
                             while (chansSpecified--) {
                                 if (!strncmp (cptr, "SLFT", 4) || !strncmp (cptr, "MLFT", 4))
@@ -269,7 +285,14 @@ int ParseDsdiffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpa
         else {          // just copy unknown chunks to output file
 
             int bytes_to_copy = (int)(((dff_chunk_header.ckDataSize) + 1) & ~(int64_t)1);
-            char *buff = malloc (bytes_to_copy);
+            char *buff;
+
+            if (bytes_to_copy < 0 || bytes_to_copy > 4194304) {
+                error_line ("%s is not a valid .DFF file!", infilename);
+                return WAVPACK_SOFT_ERROR;
+            }
+
+            buff = malloc (bytes_to_copy);
 
             if (debug_logging_mode)
                 error_line ("extra unknown chunk \"%c%c%c%c\" of %d bytes",
