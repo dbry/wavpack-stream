@@ -29,7 +29,7 @@
 
 static const char *sign_on = "\n"
 " WVTEST-STREAM  Streaming Audio Compression Tester  %s Version %s\n"
-" Copyright (c) 2018 David Bryant.  All Rights Reserved.\n\n";
+" Copyright (c) 2019 David Bryant.  All Rights Reserved.\n\n";
 
 static const char *version_warning = "\n"
 " WARNING: WVTEST using libwavpack-stream version %s, expected %s (see README)\n\n";
@@ -40,6 +40,8 @@ static const char *usage =
 "          --exhaustive        = perform the exhaustive test suite\n"
 "          --short             = perform shorter runs of each test\n"
 "          --long              = perform longer runs of each test\n"
+"          --fuzz-period=n     = fuzz at specified average period in bytes\n"
+"                                (decode errors reported and ignored)\n"
 "          --no-decode         = skip the decoding process\n"
 "          --no-extras         = skip the \"extra\" modes\n"
 "          --no-hybrid         = skip the hybrid modes\n"
@@ -67,10 +69,10 @@ static const char *usage =
 #define TEST_FLAG_IGNORE_WVC            0x4000
 #define TEST_FLAG_NO_DECODE             0x8000
 
-static int run_test_size_modes (int wpconfig_flags, int test_flags, int base_minutes);
-static int run_test_speed_modes (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds);
-static int run_test_extra_modes (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds);
-static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds);
+static int run_test_size_modes (int wpconfig_flags, int test_flags, int base_minutes, int fuzz_period);
+static int run_test_speed_modes (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds, int fuzz_period);
+static int run_test_extra_modes (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds, int fuzz_period);
+static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds, int fuzz_period);
 
 #define NUM_WRITE_RANGES 10
 static struct { int start, stop; } write_ranges [NUM_WRITE_RANGES];
@@ -103,12 +105,14 @@ static void truncate_float_samples (float *samples, int num_samples, int bits);
 static void float_to_integer_samples (float *samples, int num_samples, int bits);
 static void float_to_32bit_integer_samples (float *samples, int num_samples);
 static void *store_samples (void *dst, int32_t *src, int qmode, int bps, int count);
+static void frandom_set_seed (uint64_t seed);
+static uint64_t frandom_get_seed (void);
 static double frandom (void);
 
 typedef struct {
     uint32_t buffer_size, bytes_written, bytes_read, first_block_size;
     volatile unsigned char *buffer_base, *buffer_head, *buffer_tail;
-    int push_back, done, error, empty_waits, full_waits;
+    int push_back, done, error, empty_waits, full_waits, fuzz_period;
     pthread_cond_t cond_read, cond_write;
     pthread_mutex_t mutex;
     FILE *file;
@@ -121,7 +125,7 @@ typedef struct {
     int num_errors;
 } WavpackDecoder;
 
-static void initialize_stream (StreamingFile *ws, int buffer_size);
+static void initialize_stream (StreamingFile *ws, int buffer_size, int fuzz_period);
 static int write_block (void *id, void *data, int32_t length);
 static void flush_stream (StreamingFile *ws);
 static void free_stream (StreamingFile *ws);
@@ -133,6 +137,7 @@ static WavpackReader freader;
 int main (argc, argv) int argc; char **argv;
 {
     int wpconfig_flags = CONFIG_MD5_CHECKSUM | CONFIG_OPTIMIZE_MONO, test_flags = 0, base_minutes = 2, res;
+    int fuzz_period = 0;
 
     // loop through command-line arguments
 
@@ -182,6 +187,14 @@ int main (argc, argv) int argc; char **argv;
             }
             else if (!strcmp (long_option, "no-decode")) {              // --no-decode
                 test_flags |= TEST_FLAG_NO_DECODE;
+            }
+            else if (!strncmp (long_option, "fuzz-period", 11)) {       // --fuzz-period
+                fuzz_period = strtol (long_param, NULL, 10);
+
+                if (fuzz_period < 10 || fuzz_period > 1000000) {
+                    printf ("invalid fuzz period, must be 10 - 1000000 bytes!\n");
+                    return 1;
+                }
             }
             else if (!strncmp (long_option, "write", 5)) {              // --write
                 for (number_of_ranges = 0; *long_param && isdigit (*long_param) && number_of_ranges < NUM_WRITE_RANGES;) {
@@ -234,22 +247,24 @@ int main (argc, argv) int argc; char **argv;
     }
 
     printf ("\n\n                          ****** pure lossless ******\n");
-    res = run_test_size_modes (wpconfig_flags, test_flags, base_minutes);
+    res = run_test_size_modes (wpconfig_flags, test_flags, base_minutes, fuzz_period);
     if (res) goto done;
 
     if (!(test_flags & TEST_FLAG_NO_HYBRID)) {
-        printf ("\n\n                         ****** hybrid lossless ******\n");
-        res = run_test_size_modes (wpconfig_flags | CONFIG_HYBRID_FLAG | CONFIG_CREATE_WVC, test_flags, base_minutes);
-        if (res) goto done;
+        if (!fuzz_period) {
+            printf ("\n\n                         ****** hybrid lossless ******\n");
+            res = run_test_size_modes (wpconfig_flags | CONFIG_HYBRID_FLAG | CONFIG_CREATE_WVC, test_flags, base_minutes, fuzz_period);
+            if (res) goto done;
+        }
 
         if (!(test_flags & TEST_FLAG_NO_LOSSY)) {
             printf ("\n\n                          ****** hybrid lossy ******\n");
-            res = run_test_size_modes (wpconfig_flags | CONFIG_HYBRID_FLAG, test_flags, base_minutes);
+            res = run_test_size_modes (wpconfig_flags | CONFIG_HYBRID_FLAG, test_flags, base_minutes, fuzz_period);
             if (res) goto done;
 
             printf ("\n\n            ****** hybrid lossless (but ignore wpsc on decode) ******\n");
             res = run_test_size_modes (wpconfig_flags | CONFIG_HYBRID_FLAG | CONFIG_CREATE_WVC,
-                test_flags | TEST_FLAG_IGNORE_WVC, base_minutes);
+                test_flags | TEST_FLAG_IGNORE_WVC, base_minutes, fuzz_period);
             if (res) goto done;
         }
     }
@@ -266,53 +281,53 @@ done:
 // Given a WavPack configuration and test flags, run the various combinations of
 // bit-depth and channel configurations. A return value of FALSE indicates an error.
 
-static int run_test_size_modes (int wpconfig_flags, int test_flags, int base_minutes)
+static int run_test_size_modes (int wpconfig_flags, int test_flags, int base_minutes, int fuzz_period)
 {
     int res;
 
     printf ("\n   *** 8-bit, mono ***\n");
-    res = run_test_speed_modes (wpconfig_flags, test_flags, 8, 1, base_minutes*5*60);
+    res = run_test_speed_modes (wpconfig_flags, test_flags, 8, 1, base_minutes*5*60, fuzz_period);
     if (res) return res;
 
     if (test_flags & TEST_FLAG_EXHAUSTIVE) {
         printf ("\n   *** 16-bit, mono ***\n");
-        res = run_test_speed_modes (wpconfig_flags, test_flags, 16, 1, base_minutes*5*60);
+        res = run_test_speed_modes (wpconfig_flags, test_flags, 16, 1, base_minutes*5*60, fuzz_period);
         if (res) return res;
     }
 
     printf ("\n   *** 16-bit, stereo ***\n");
-    res = run_test_speed_modes (wpconfig_flags, test_flags, 16, 2, base_minutes*3*60);
+    res = run_test_speed_modes (wpconfig_flags, test_flags, 16, 2, base_minutes*3*60, fuzz_period);
     if (res) return res;
 
     if ((test_flags & TEST_FLAG_EXHAUSTIVE) && !(test_flags & TEST_FLAG_NO_FLOATS)) {
         printf ("\n   *** 16-bit (converted to float), stereo ***\n");
-        res = run_test_speed_modes (wpconfig_flags, test_flags | TEST_FLAG_FLOAT_DATA, 16, 2, base_minutes*3*60);
+        res = run_test_speed_modes (wpconfig_flags, test_flags | TEST_FLAG_FLOAT_DATA, 16, 2, base_minutes*3*60, fuzz_period);
         if (res) return res;
     }
 
     printf ("\n   *** 24-bit, 5.1 channels ***\n");
-    res = run_test_speed_modes (wpconfig_flags, test_flags, 24, 6, base_minutes*60);
+    res = run_test_speed_modes (wpconfig_flags, test_flags, 24, 6, base_minutes*60, fuzz_period);
     if (res) return res;
 
     if (test_flags & TEST_FLAG_EXHAUSTIVE) {
         if (!(test_flags & TEST_FLAG_NO_FLOATS)) {
             printf ("\n   *** 24-bit (converted to float), 5.1 channels ***\n");
-            res = run_test_speed_modes (wpconfig_flags, test_flags | TEST_FLAG_FLOAT_DATA, 24, 6, base_minutes*60);
+            res = run_test_speed_modes (wpconfig_flags, test_flags | TEST_FLAG_FLOAT_DATA, 24, 6, base_minutes*60, fuzz_period);
             if (res) return res;
         }
  
         printf ("\n   *** 32-bit integer, 5.1 channels ***\n");
-        res = run_test_speed_modes (wpconfig_flags, test_flags, 32, 6, base_minutes*60);
+        res = run_test_speed_modes (wpconfig_flags, test_flags, 32, 6, base_minutes*60, fuzz_period);
         if (res) return res;
 
         if (!(test_flags & TEST_FLAG_NO_FLOATS)) {
             printf ("\n   *** 32-bit float stored as integer (pathological), 5.1 channels ***\n");
-            res = run_test_speed_modes (wpconfig_flags, test_flags | TEST_FLAG_STORE_FLOAT_AS_INT32, 32, 6, base_minutes*60);
+            res = run_test_speed_modes (wpconfig_flags, test_flags | TEST_FLAG_STORE_FLOAT_AS_INT32, 32, 6, base_minutes*60, fuzz_period);
             if (res) return res;
         
             if (!(wpconfig_flags & CONFIG_HYBRID_FLAG)) {
                 printf ("\n   *** 32-bit integer stored as float (pathological), 5.1 channels ***\n");
-                res = run_test_speed_modes (wpconfig_flags, test_flags | TEST_FLAG_STORE_INT32_AS_FLOAT, 32, 6, base_minutes*60);
+                res = run_test_speed_modes (wpconfig_flags, test_flags | TEST_FLAG_STORE_INT32_AS_FLOAT, 32, 6, base_minutes*60, fuzz_period);
                 if (res) return res;
             }
         }
@@ -320,7 +335,7 @@ static int run_test_size_modes (int wpconfig_flags, int test_flags, int base_min
 
     if (!(test_flags & TEST_FLAG_NO_FLOATS)) {
         printf ("\n   *** 32-bit float, 5.1 channels ***\n");
-        res = run_test_speed_modes (wpconfig_flags, test_flags | TEST_FLAG_FLOAT_DATA, 32, 6, base_minutes*60);
+        res = run_test_speed_modes (wpconfig_flags, test_flags | TEST_FLAG_FLOAT_DATA, 32, 6, base_minutes*60, fuzz_period);
         if (res) return res;
     }
 
@@ -330,25 +345,25 @@ static int run_test_size_modes (int wpconfig_flags, int test_flags, int base_min
 // Given a WavPack configuration and test flags, run the various combinations of
 // speed modes (i.e, fast, high, etc). A return value of FALSE indicates an error.
 
-static int run_test_speed_modes (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds)
+static int run_test_speed_modes (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds, int fuzz_period)
 {
     int res;
 
     if (!(test_flags & TEST_FLAG_NO_SPEEDS)) {
-        res = run_test_extra_modes (wpconfig_flags | CONFIG_FAST_FLAG, test_flags, bits, num_chans, num_seconds);
+        res = run_test_extra_modes (wpconfig_flags | CONFIG_FAST_FLAG, test_flags, bits, num_chans, num_seconds, fuzz_period);
         if (res) return res;
     }
 
-    res = run_test_extra_modes (wpconfig_flags, test_flags, bits, num_chans, num_seconds);
+    res = run_test_extra_modes (wpconfig_flags, test_flags, bits, num_chans, num_seconds, fuzz_period);
     if (res) return res;
 
     if (!(test_flags & TEST_FLAG_NO_SPEEDS)) {
-        res = run_test_extra_modes (wpconfig_flags | CONFIG_HIGH_FLAG, test_flags, bits, num_chans, num_seconds);
+        res = run_test_extra_modes (wpconfig_flags | CONFIG_HIGH_FLAG, test_flags, bits, num_chans, num_seconds, fuzz_period);
         if (res) return res;
     }
 
     if (!(test_flags & TEST_FLAG_NO_SPEEDS)) {
-        res = run_test_extra_modes (wpconfig_flags | CONFIG_VERY_HIGH_FLAG, test_flags, bits, num_chans, num_seconds);
+        res = run_test_extra_modes (wpconfig_flags | CONFIG_VERY_HIGH_FLAG, test_flags, bits, num_chans, num_seconds, fuzz_period);
         if (res) return res;
     }
 
@@ -360,43 +375,43 @@ static int run_test_speed_modes (int wpconfig_flags, int test_flags, int bits, i
 // different extra modes. Combining the "default" and "exhaustive" configurations does all the extra
 // modes. A return value of FALSE indicates an error.
 
-static int run_test_extra_modes (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds)
+static int run_test_extra_modes (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds, int fuzz_period)
 {
     int res;
 
-    res = run_test (wpconfig_flags, test_flags, bits, num_chans, num_seconds);
+    res = run_test (wpconfig_flags, test_flags, bits, num_chans, num_seconds, fuzz_period);
     if (res) return res;
 
     if (test_flags & TEST_FLAG_NO_EXTRAS)
         return 0;
 
     if (test_flags & TEST_FLAG_EXHAUSTIVE) {
-        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (1), bits, num_chans, num_seconds);
+        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (1), bits, num_chans, num_seconds, fuzz_period);
         if (res) return res;
     }
 
     if (test_flags & TEST_FLAG_DEFAULT) {
-        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (2), bits, num_chans, num_seconds);
+        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (2), bits, num_chans, num_seconds, fuzz_period);
         if (res) return res;
     }
 
     if (test_flags & TEST_FLAG_EXHAUSTIVE) {
-        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (3), bits, num_chans, num_seconds);
+        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (3), bits, num_chans, num_seconds, fuzz_period);
         if (res) return res;
     }
 
     if (test_flags & TEST_FLAG_EXHAUSTIVE) {
-        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (4), bits, num_chans, num_seconds);
+        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (4), bits, num_chans, num_seconds, fuzz_period);
         if (res) return res;
     }
 
     if (test_flags & TEST_FLAG_DEFAULT) {
-        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (5), bits, num_chans, num_seconds);
+        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (5), bits, num_chans, num_seconds, fuzz_period);
         if (res) return res;
     }
 
     if (test_flags & TEST_FLAG_EXHAUSTIVE) {
-        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (6), bits, num_chans, num_seconds);
+        res = run_test (wpconfig_flags, test_flags | TEST_FLAG_EXTRA_MODE (6), bits, num_chans, num_seconds, fuzz_period);
         if (res) return res;
     }
 
@@ -423,7 +438,7 @@ struct audio_channel {
 #define NOISE_GAIN 0.6667
 #define TONE_GAIN 0.3333
 
-static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds)
+static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans, int num_seconds, int fuzz_period)
 {
     static int test_number;
 
@@ -514,11 +529,11 @@ static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans
     }
 
     if (!(test_flags & TEST_FLAG_NO_DECODE)) {
-        initialize_stream (&wv_stream, BUFFER_SIZE);
+        initialize_stream (&wv_stream, BUFFER_SIZE, fuzz_period);
         wv_decoder.wv_stream = &wv_stream;
     }
     else
-        initialize_stream (&wv_stream, 0);
+        initialize_stream (&wv_stream, 0, 0);
 
     if (test_flags & TEST_FLAG_WRITE_FILE) {
         int i;
@@ -546,11 +561,11 @@ static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans
 
     if (wpconfig_flags & CONFIG_CREATE_WVC) {
         if (!(test_flags & (TEST_FLAG_IGNORE_WVC | TEST_FLAG_NO_DECODE))) {
-            initialize_stream (&wvc_stream, BUFFER_SIZE);
+            initialize_stream (&wvc_stream, BUFFER_SIZE, fuzz_period);
             wv_decoder.wvc_stream = &wvc_stream;
         }
         else
-            initialize_stream (&wvc_stream, 0);
+            initialize_stream (&wvc_stream, 0, 0);
 
         if (filename) {
             char *filename_c = malloc (strlen (filename) + 10);
@@ -661,7 +676,9 @@ static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans
             }
         }
 
-	WavpackStreamPackSamples (out_wpc, (int32_t *) destin, ENCODE_SAMPLES);
+	if (!WavpackStreamPackSamples (out_wpc, (int32_t *) destin, ENCODE_SAMPLES))
+            printf ("...PackSamples() returned FALSE\n");
+
         store_samples (destin, (int32_t *) destin, 0, wpconfig.bytes_per_sample, ENCODE_SAMPLES * num_chans);
         MD5_Update (&md5_context, (unsigned char *) destin, wpconfig.bytes_per_sample * ENCODE_SAMPLES * num_chans);
 
@@ -723,6 +740,9 @@ static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans
         }
     }
 
+    free_stream (&wv_stream);
+    free_stream (&wvc_stream);
+
     if (!(test_flags & TEST_FLAG_NO_DECODE)) {
         for (i = 0; i < 16; ++i) {
             sprintf (md5_string1 + (i * 2), "%02x", md5_encoded [i]);
@@ -737,12 +757,9 @@ static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans
                 printf ("decoded md5: %s\n", md5_string2);
                 printf ("reported decode errors: %d\n", wv_decoder.num_errors);
                 printf ("---------------------------------------------\n");
-                return wv_decoder.num_errors + 1;
+                return fuzz_period ? 0 : wv_decoder.num_errors + 1;
         }
     }
-
-    free_stream (&wv_stream);
-    free_stream (&wvc_stream);
 
     printf ("pass (%8s, %.2f%%, %.2f bps, %s)\n", mode_string, 100.0 - ratio * 100.0, bps, md5_string2);
 
@@ -758,15 +775,24 @@ static void *decode_thread (void *threadid)
 {
     WavpackDecoder *wd = (WavpackDecoder *) threadid;
     char error [80];
-    WavpackContext *wpc = WavpackStreamOpenFileInputEx (&freader, wd->wv_stream, wd->wvc_stream, error, 0, 0);
+    WavpackContext *wpc;
     int32_t *decoded_samples, num_chans, bps;
     MD5_CTX md5_context;
 
-    if (!wpc) {
-        printf ("decode_thread(): error \"%s\" opening input file\n", error);
-        wd->num_errors = 1;
-        pthread_exit (NULL);
+    while (1) {
+        wpc = WavpackStreamOpenFileInputEx (&freader, wd->wv_stream, wd->wvc_stream, error, 0, 0);
+
+        if (wpc)
+            break;
+
+        wd->num_errors++;
+
+        if (wd->wv_stream->done || (wd->wvc_stream && wd->wvc_stream->done))
+            break;
     }
+
+    if (!wpc)
+        pthread_exit (NULL);
 
     MD5_Init (&md5_context);
     num_chans = WavpackStreamGetNumChannels (wpc);
@@ -782,12 +808,15 @@ static void *decode_thread (void *threadid)
     while (1) {
         int samples = WavpackStreamUnpackSamples (wpc, decoded_samples, DECODE_SAMPLES);
 
-        if (!samples)
+        if (samples) {
+            store_samples (decoded_samples, decoded_samples, 0, bps, samples * num_chans);
+            MD5_Update (&md5_context, (unsigned char *) decoded_samples, bps * samples * num_chans);
+            wd->sample_count += samples;
+        }
+        else if (wd->wv_stream->done || (wd->wvc_stream && wd->wvc_stream->done))
             break;
-
-        store_samples (decoded_samples, decoded_samples, 0, bps, samples * num_chans);
-        MD5_Update (&md5_context, (unsigned char *) decoded_samples, bps * samples * num_chans);
-        wd->sample_count += samples;
+        else
+            wd->num_errors++;
     }
 
     MD5_Final (wd->md5_decoded, &md5_context);
@@ -796,6 +825,60 @@ static void *decode_thread (void *threadid)
     WavpackStreamCloseFile (wpc);
     pthread_exit (NULL);
     return NULL;
+}
+
+// Given a desired average period of corruptions and the length of the input data,
+// calculate the probability that the specified number of hits will occur.
+
+static double hit_probability (int period, int length, int num_hits)
+{
+    double probability = pow ((period - 1.0) / period, length - num_hits);
+    int hits;
+
+    for (hits = 0; hits < num_hits; ++hits)
+        probability *= (double)(length - hits) / (period * (hits + 1));
+
+    return probability;
+}
+
+// Fuzzing code. The fuzz "period" is the average distance in bytes between corrupted samples
+// (but of course they are randomly distributed). For each byte selected for corruption, we
+// randomly choose between 1 and 8 bits to toggle. We don't check for duplicate bits or bytes.
+// So that the underlying file is identical regardless of fuzzing, we load and restore the
+// random number generator seed value.
+
+static void fuzz_buffer (void *data, int32_t length, int fuzz_period)
+{
+    uint64_t saved_seed = frandom_get_seed();
+    double fuzz_factor = frandom (), probability_accum = 0.0;
+    unsigned char *data_ptr = data;
+    int num_hits = 0;
+
+    while (1) {
+        if ((probability_accum += hit_probability (fuzz_period, length, num_hits)) < fuzz_factor)
+            num_hits++;
+        else
+            break;
+
+        if (num_hits == (length + 1) / 2)   // should not get here, but let's not hang...
+            break;
+    }
+
+    while (num_hits--) {
+        int index = floor (frandom () * length);
+        int delta_bits = ceil (frandom () * 8);
+        unsigned char initial_value;
+
+        if (index == length)
+            index--;
+
+        initial_value = data_ptr [index];
+
+        while (delta_bits-- > 0 || data_ptr [index] == initial_value)
+            data_ptr [index] ^= 1 << (int)(floor (frandom () * 8));
+    }
+
+    frandom_set_seed (saved_seed);
 }
 
 // This code implements a simple virtual "file" so that we can have a WavPack encoding process and
@@ -809,8 +892,8 @@ static int write_block (void *id, void *data, int32_t length)
     if (!ws || !data || !length)
 	return 0;
 
-//    if (frandom() < .0001)
-//        ((char *) data) [(int) floor (length * frandom())] ^= 1;
+    if (ws->fuzz_period)
+        fuzz_buffer (data, length, ws->fuzz_period);
 
     if (!ws->first_block_size)
         ws->first_block_size = length;
@@ -952,11 +1035,12 @@ static WavpackReader freader = {
     read_bytes, get_pos, set_pos_abs, set_pos_rel, push_back_byte, get_length, can_seek,
 };
 
-static void initialize_stream (StreamingFile *ws, int buffer_size)
+static void initialize_stream (StreamingFile *ws, int buffer_size, int fuzz_period)
 {
     if (buffer_size) {
         ws->buffer_base = malloc (ws->buffer_size = buffer_size);
         ws->buffer_head = ws->buffer_tail = ws->buffer_base;
+        ws->fuzz_period = fuzz_period;
         pthread_cond_init (&ws->cond_write, NULL);
         pthread_cond_init (&ws->cond_read, NULL);
         pthread_mutex_init (&ws->mutex, NULL);
@@ -990,13 +1074,24 @@ static void free_stream (StreamingFile *ws)
 
 // Return a random value in the range: 0.0 <= n < 1.0
 
+static uint64_t random_seed = 0x3141592653589793;
+
 static double frandom (void)
 {
-    static uint64_t random = 0x3141592653589793;
-    random = ((random << 4) - random) ^ 1;
-    random = ((random << 4) - random) ^ 1;
-    random = ((random << 4) - random) ^ 1;
-    return (random >> 32) / 4294967296.0;
+    random_seed = ((random_seed << 4) - random_seed) ^ 1;
+    random_seed = ((random_seed << 4) - random_seed) ^ 1;
+    random_seed = ((random_seed << 4) - random_seed) ^ 1;
+    return (random_seed >> 32) / 4294967296.0;
+}
+
+static uint64_t frandom_get_seed (void)
+{
+    return random_seed;
+}
+
+static void frandom_set_seed (uint64_t seed)
+{
+    random_seed = seed;
 }
 
 static void tone_generator_init (struct audio_generator *cxt, int sample_rate, int low_freq, int high_freq)
