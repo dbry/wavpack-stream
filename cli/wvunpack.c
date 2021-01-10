@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
 //                       **** WAVPACK-STREAM ****                         //
 //                      Streaming Audio Compressor                        //
-//                Copyright (c) 1998 - 2018 David Bryant.                 //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -1201,10 +1201,12 @@ static int unpack_file (char *infilename, char *outfilename, int add_extension)
 
     total_unpacked_samples = until_samples_total;
 
-    if (output_qmode & QMODE_DSD_AUDIO)
-        result = unpack_dsd_audio (wpc, outfile, output_qmode, calc_md5 ? md5_unpacked : NULL, &total_unpacked_samples);
-    else
-        result = unpack_audio (wpc, outfile, output_qmode, calc_md5 ? md5_unpacked : NULL, &total_unpacked_samples);
+    if (result == WAVPACK_NO_ERROR) {
+        if (output_qmode & QMODE_DSD_AUDIO)
+            result = unpack_dsd_audio (wpc, outfile, output_qmode, calc_md5 ? md5_unpacked : NULL, &total_unpacked_samples);
+        else
+            result = unpack_audio (wpc, outfile, output_qmode, calc_md5 ? md5_unpacked : NULL, &total_unpacked_samples);
+    }
 
     // if the file format has chunk alignment requirements, and our data chunk does not align, write padding bytes here
 
@@ -1970,6 +1972,10 @@ static void dump_summary (WavpackContext *wpc, char *name, FILE *dst)
         strcpy (modes, "quad");
     else if (num_channels == 6 && channel_mask == 0x3f)
         strcpy (modes, "5.1 surround");
+    else if (num_channels == 6 && channel_mask == 0x60f)
+        strcpy (modes, "5.1 surround side");
+    else if (num_channels == 8 && channel_mask == 0x63f)
+        strcpy (modes, "7.1 surround");
     else if (num_channels == 8 && channel_mask == 0x6000003f)
         strcpy (modes, "5.1 + stereo");
     else {

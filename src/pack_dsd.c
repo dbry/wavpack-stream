@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
-//                           **** DSDPACK ****                            //
-//         Lossless DSD (Direct Stream Digital) Audio Compressor          //
-//                Copyright (c) 2013 - 2016 David Bryant.                 //
+//                       **** WAVPACK-STREAM ****                         //
+//                      Streaming Audio Compressor                        //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -176,7 +176,6 @@ int pack_dsd_block (WavpackContext *wpc, int32_t *buffer)
 // #define DSD_BYTE_READY(low,high) (!(((low) ^ (high)) >> 24))
 #define DSD_BYTE_READY(low,high) (!(((low) ^ (high)) & 0xff000000))
 
-#define MAX_HISTORY_BITS    5
 #define MAX_PROBABILITY     0xa0    // set to 0xff to disable RLE encoding for probabilities table
 
 #if (MAX_PROBABILITY < 0xff)
@@ -362,7 +361,7 @@ static int encode_buffer_fast (WavpackStream *wps, int32_t *buffer, int num_samp
     // normally only happen with large blocks or poorly compressible data. The target is to guarantee that the total memory
     // required for all three decode tables will be 2K bytes per history bin.
 
-    while (total_summed_probabilities > history_bins * 1280) {
+    while (total_summed_probabilities > history_bins * MAX_BYTES_PER_BIN) {
         int max_sum = 0, sum_values = 0, largest_bin = 0;
 
         for (p0 = 0; p0 < history_bins; ++p0)
@@ -571,7 +570,7 @@ static int encode_buffer_high (WavpackStream *wps, int32_t *buffer, int num_samp
         *dp++ = sp->factor;
         *dp++ = sp->factor >> 8;
         sp->filter6 = 0;
-        sp->factor = (sp->factor << 16) >> 16;
+        sp->factor = (int32_t)((uint32_t) sp->factor << 16) >> 16;
     }
 
     sp = wps->dsd.filters;
@@ -607,8 +606,8 @@ static int encode_buffer_high (WavpackStream *wps, int32_t *buffer, int num_samp
                 low <<= 8;
             }
 
-            sp [0].value += sp [0].filter6 << 3;
-            sp [0].factor += (((sp [0].value ^ sp [0].filter0) >> 31) | 1) & ((sp [0].value ^ (sp [0].value - (sp [0].filter6 << 4))) >> 31);
+            sp [0].value += sp [0].filter6 * 8;
+            sp [0].factor += (((sp [0].value ^ sp [0].filter0) >> 31) | 1) & ((sp [0].value ^ (sp [0].value - (sp [0].filter6 * 16))) >> 31);
             sp [0].filter1 += ((sp [0].filter0 & VALUE_ONE) - sp [0].filter1) >> 6;
             sp [0].filter2 += ((sp [0].filter0 & VALUE_ONE) - sp [0].filter2) >> 4;
             sp [0].filter3 += (sp [0].filter2 - sp [0].filter3) >> 4;
@@ -641,8 +640,8 @@ static int encode_buffer_high (WavpackStream *wps, int32_t *buffer, int num_samp
                 low <<= 8;
             }
 
-            sp [1].value += sp [1].filter6 << 3;
-            sp [1].factor += (((sp [1].value ^ sp [1].filter0) >> 31) | 1) & ((sp [1].value ^ (sp [1].value - (sp [1].filter6 << 4))) >> 31);
+            sp [1].value += sp [1].filter6 * 8;
+            sp [1].factor += (((sp [1].value ^ sp [1].filter0) >> 31) | 1) & ((sp [1].value ^ (sp [1].value - (sp [1].filter6 * 16))) >> 31);
             sp [1].filter1 += ((sp [1].filter0 & VALUE_ONE) - sp [1].filter1) >> 6;
             sp [1].filter2 += ((sp [1].filter0 & VALUE_ONE) - sp [1].filter2) >> 4;
             sp [1].filter3 += (sp [1].filter2 - sp [1].filter3) >> 4;

@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
 //                       **** WAVPACK-STREAM ****                         //
 //                      Streaming Audio Compressor                        //
-//                Copyright (c) 1998 - 2018 David Bryant.                 //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -424,7 +424,7 @@ int main (int argc, char **argv)
             else if (!strncmp (long_option, "block-samples", 13)) {     // --block-samples
                 config.block_samples = strtol (long_param, NULL, 10);
 
-                if (config.block_samples < 100 || config.block_samples > 8000) {
+                if (config.block_samples < 50 || config.block_samples > 8000) {
                     error_line ("invalid block-samples!");
                     ++error_count;
                 }
@@ -1404,6 +1404,8 @@ static int pack_file (char *infilename, char *outfilename, char *out2filename, c
         error_line ("can't create file %s!", use_tempfiles ? outfilename_temp : outfilename);
         DoCloseHandle (infile);
         WavpackStreamCloseFile (wpc);
+        free (outfilename_temp);
+        free (out2filename_temp);
         return WAVPACK_SOFT_ERROR;
     }
 
@@ -1436,6 +1438,8 @@ static int pack_file (char *infilename, char *outfilename, char *out2filename, c
             DoCloseHandle (wv_file.file);
             DoDeleteFile (use_tempfiles ? outfilename_temp : outfilename);
             WavpackStreamCloseFile (wpc);
+            free (outfilename_temp);
+            free (out2filename_temp);
             return WAVPACK_SOFT_ERROR;
         }
 
@@ -1451,6 +1455,8 @@ static int pack_file (char *infilename, char *outfilename, char *out2filename, c
                     DoCloseHandle (wv_file.file);
                     DoDeleteFile (use_tempfiles ? outfilename_temp : outfilename);
                     WavpackStreamCloseFile (wpc);
+                    free (outfilename_temp);
+                    free (out2filename_temp);
                     return WAVPACK_SOFT_ERROR;
                 }
 
@@ -1464,6 +1470,8 @@ static int pack_file (char *infilename, char *outfilename, char *out2filename, c
             DoCloseHandle (wv_file.file);
             DoDeleteFile (use_tempfiles ? outfilename_temp : outfilename);
             WavpackStreamCloseFile (wpc);
+            free (outfilename_temp);
+            free (out2filename_temp);
             return WAVPACK_SOFT_ERROR;
         }
     }
@@ -1486,6 +1494,8 @@ static int pack_file (char *infilename, char *outfilename, char *out2filename, c
             DoCloseHandle (wv_file.file);
             DoDeleteFile (use_tempfiles ? outfilename_temp : outfilename);
             WavpackStreamCloseFile (wpc);
+            free (outfilename_temp);
+            free (out2filename_temp);
             return WAVPACK_SOFT_ERROR;
         }
     }
@@ -1517,6 +1527,8 @@ static int pack_file (char *infilename, char *outfilename, char *out2filename, c
                 DoCloseHandle (wv_file.file);
                 DoDeleteFile (use_tempfiles ? outfilename_temp : outfilename);
                 WavpackStreamCloseFile (wpc);
+                free (outfilename_temp);
+                free (out2filename_temp);
                 return WAVPACK_SOFT_ERROR;
             }
 
@@ -1552,6 +1564,8 @@ static int pack_file (char *infilename, char *outfilename, char *out2filename, c
             DoCloseHandle (wv_file.file);
             DoDeleteFile (use_tempfiles ? outfilename_temp : outfilename);
             WavpackStreamCloseFile (wpc);
+            free (outfilename_temp);
+            free (out2filename_temp);
             return WAVPACK_SOFT_ERROR;
         }
     }
@@ -1718,6 +1732,8 @@ static int pack_file (char *infilename, char *outfilename, char *out2filename, c
             DoDeleteFile (use_tempfiles ? out2filename_temp : out2filename);
 
         WavpackStreamCloseFile (wpc);
+        free (outfilename_temp);
+        free (out2filename_temp);
         return result;
     }
 
@@ -3176,7 +3192,7 @@ static void load_little_endian_unsigned_samples (int32_t *dst, void *src, int bp
 
         case 4:
             while (count--) {
-                *dst++ = (sptr [0] | ((int32_t) sptr [1] << 8) | ((int32_t) sptr [2] << 16) | ((int32_t) sptr [3] << 24)) - 0x80000000;
+                *dst++ = (sptr [0] | sptr [1] << 8 | sptr [2] << 16 | (uint32_t) sptr [3] << 24) ^ 0x80000000;
                 sptr += 4;
             }
 
@@ -3198,7 +3214,7 @@ static void load_little_endian_signed_samples (int32_t *dst, void *src, int bps,
 
         case 2:
             while (count--) {
-                *dst++ = sptr [0] | ((int32_t)(signed char) sptr [1] << 8);
+                *dst++ = (int16_t)(sptr [0] | sptr [1] << 8);
                 sptr += 2;
             }
 
@@ -3206,7 +3222,7 @@ static void load_little_endian_signed_samples (int32_t *dst, void *src, int bps,
 
         case 3:
             while (count--) {
-                *dst++ = sptr [0] | ((int32_t) sptr [1] << 8) | ((int32_t)(signed char) sptr [2] << 16);
+                *dst++ = (int32_t)((uint32_t)(sptr [0] | sptr [1] << 8 | sptr [2] << 16) << 8) >> 8;
                 sptr += 3;
             }
 
@@ -3214,7 +3230,7 @@ static void load_little_endian_signed_samples (int32_t *dst, void *src, int bps,
 
         case 4:
             while (count--) {
-                *dst++ = sptr [0] | ((int32_t) sptr [1] << 8) | ((int32_t) sptr [2] << 16) | ((int32_t)(signed char) sptr [3] << 24);
+                *dst++ = sptr [0] | sptr [1] << 8 | sptr [2] << 16 | (uint32_t) sptr [3] << 24;
                 sptr += 4;
             }
 
@@ -3252,7 +3268,7 @@ static void load_big_endian_unsigned_samples (int32_t *dst, void *src, int bps, 
 
         case 4:
             while (count--) {
-                *dst++ = (sptr [3] | ((int32_t) sptr [2] << 8) | ((int32_t) sptr [1] << 16) | ((int32_t) sptr [0] << 24)) - 0x80000000;
+                *dst++ = (sptr [3] | sptr [2] << 8 | sptr [1] << 16 | (uint32_t) sptr [0] << 24) ^ 0x80000000;
                 sptr += 4;
             }
 
@@ -3274,7 +3290,7 @@ static void load_big_endian_signed_samples (int32_t *dst, void *src, int bps, in
 
         case 2:
             while (count--) {
-                *dst++ = sptr [1] | ((int32_t)(signed char) sptr [0] << 8);
+                *dst++ = (int16_t)(sptr [1] | sptr [0] << 8);
                 sptr += 2;
             }
 
@@ -3282,7 +3298,7 @@ static void load_big_endian_signed_samples (int32_t *dst, void *src, int bps, in
 
         case 3:
             while (count--) {
-                *dst++ = sptr [2] | ((int32_t) sptr [1] << 8) | ((int32_t)(signed char) sptr [0] << 16);
+                *dst++ = (int32_t)((uint32_t)(sptr [2] | sptr [1] << 8 | sptr [0] << 16) << 8) >> 8;
                 sptr += 3;
             }
 
@@ -3290,7 +3306,7 @@ static void load_big_endian_signed_samples (int32_t *dst, void *src, int bps, in
 
         case 4:
             while (count--) {
-                *dst++ = sptr [3] | ((int32_t) sptr [2] << 8) | ((int32_t) sptr [1] << 16) | ((int32_t)(signed char) sptr [0] << 24);
+                *dst++ = sptr [3] | sptr [2] << 8 | sptr [1] << 16 | (uint32_t) sptr [0] << 24;
                 sptr += 4;
             }
 

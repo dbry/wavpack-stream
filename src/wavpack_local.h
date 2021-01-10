@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
 //                       **** WAVPACK-STREAM ****                         //
 //                      Streaming Audio Compressor                        //
-//                Copyright (c) 1998 - 2018 David Bryant.                 //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -68,8 +68,8 @@ typedef int32_t f32;
 #define get_sign(f)         (((f) >> 31) & 0x1)
 
 #define set_mantissa(f,v)   (f) ^= (((f) ^ (v)) & 0x7fffff)
-#define set_exponent(f,v)   (f) ^= (((f) ^ ((v) << 23)) & 0x7f800000)
-#define set_sign(f,v)       (f) ^= (((f) ^ ((v) << 31)) & 0x80000000)
+#define set_exponent(f,v)   (f) ^= (((f) ^ ((uint32_t)(v) << 23)) & 0x7f800000)
+#define set_sign(f,v)       (f) ^= (((f) ^ ((uint32_t)(v) << 31)) & 0x80000000)
 
 #include <stdio.h>
 
@@ -283,6 +283,14 @@ typedef struct bs {
 #define MAX_NTERMS 16
 #define MAX_TERM 8
 
+// DSD-specific definitions
+
+#define MAX_HISTORY_BITS    5       // maximum number of history bits in DSD "fast" mode
+                                    // note that 5 history bits requires 32 history bins
+#define MAX_BYTES_PER_BIN   1280    // maximum bytes for the value lookup array (per bin)
+                                    //  such that the total storage per bin = 2K (also
+                                    //  counting probabilities and summed_probabilities)
+
 // Note that this structure is directly accessed in assembly files, so modify with care
 
 struct decorr_pass {
@@ -308,7 +316,8 @@ struct words_data {
 };
 
 typedef struct {
-    int32_t value, filter0, filter1, filter2, filter3, filter4, filter5, filter6, factor, byte;
+    int32_t value, filter0, filter1, filter2, filter3, filter4, filter5, filter6, factor;
+    unsigned int byte;
 } DSDfilters;
 
 typedef struct {
@@ -341,9 +350,9 @@ typedef struct {
     const WavpackDecorrSpec *decorr_specs;
 
     struct {
-        unsigned char *byteptr, *endptr, (*probabilities) [256], **value_lookup, mode, ready;
+        unsigned char *byteptr, *endptr, (*probabilities) [256], *lookup_buffer, **value_lookup, mode, ready;
         int history_bins, p0, p1;
-        int16_t (*summed_probabilities) [256];
+        uint16_t (*summed_probabilities) [256];
         uint32_t low, high, value;
         DSDfilters filters [2];
         int32_t *ptable;
@@ -552,7 +561,7 @@ uint32_t bs_close_read (Bitstream *bs);
 #define getbits(value, nbits, bs) do { \
     while ((nbits) > (bs)->bc) { \
         if (++((bs)->ptr) == (bs)->end) (bs)->wrap (bs); \
-        (bs)->sr |= (int32_t)*((bs)->ptr) << (bs)->bc; \
+        (bs)->sr |= (uint32_t)*((bs)->ptr) << (bs)->bc; \
         (bs)->bc += sizeof (*((bs)->ptr)) * 8; \
     } \
     *(value) = (bs)->sr; \
@@ -566,7 +575,7 @@ uint32_t bs_close_read (Bitstream *bs);
     } \
 } while (0)
 
-#define putbit(bit, bs) do { if (bit) (bs)->sr |= (1 << (bs)->bc); \
+#define putbit(bit, bs) do { if (bit) (bs)->sr |= (1U << (bs)->bc); \
     if (++((bs)->bc) == sizeof (*((bs)->ptr)) * 8) { \
         *((bs)->ptr) = (bs)->sr; \
         (bs)->sr = (bs)->bc = 0; \
@@ -580,7 +589,7 @@ uint32_t bs_close_read (Bitstream *bs);
         if (++((bs)->ptr) == (bs)->end) (bs)->wrap (bs); \
     }} while (0)
 
-#define putbit_1(bs) do { (bs)->sr |= (1 << (bs)->bc); \
+#define putbit_1(bs) do { (bs)->sr |= (1U << (bs)->bc); \
     if (++((bs)->bc) == sizeof (*((bs)->ptr)) * 8) { \
         *((bs)->ptr) = (bs)->sr; \
         (bs)->sr = (bs)->bc = 0; \
@@ -588,7 +597,7 @@ uint32_t bs_close_read (Bitstream *bs);
     }} while (0)
 
 #define putbits(value, nbits, bs) do { \
-    (bs)->sr |= (int32_t)(value) << (bs)->bc; \
+    (bs)->sr |= (uint32_t)(value) << (bs)->bc; \
     if (((bs)->bc += (nbits)) >= sizeof (*((bs)->ptr)) * 8) \
         do { \
             *((bs)->ptr) = (bs)->sr; \
@@ -686,7 +695,7 @@ int restore_weight (signed char weight);
 signed char store_weight_nybble (int weight);
 int restore_weight_nybble (signed char weight);
 
-#define WORD_EOF ((int32_t)(1L << 31))
+#define WORD_EOF ((int32_t)(1U << 31))
 
 void WavpackStreamFloatNormalize (int32_t *values, int32_t num_values, int delta_exp);
 
@@ -789,6 +798,7 @@ void WavpackStreamBigEndianToNative (void *data, char *format);
 void WavpackStreamNativeToBigEndian (void *data, char *format);
 
 void install_close_callback (WavpackContext *wpc, void cb_func (void *wpc));
+void free_dsd_tables (WavpackStream *wps);
 void free_streams (WavpackContext *wpc);
 
 #endif

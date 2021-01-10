@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
-//                           **** WAVPACK ****                            //
-//                  Hybrid Lossless Wavefile Compressor                   //
-//              Copyright (c) 1998 - 2013 Conifer Software.               //
+//                       **** WAVPACK-STREAM ****                         //
+//                      Streaming Audio Compressor                        //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -369,9 +369,9 @@ signed char wp_log2_schar (int32_t value)
 int32_t wp_exp2_schar (signed char log)
 {
     if (log < 0)
-        return log >= -16 ? log : wp_exp2s ((log - 4) << 6);
+        return log >= -16 ? log : wp_exp2s ((log - 4) * 64);
     else
-        return log <= 16 ? log : wp_exp2s ((log + 4) << 6);
+        return log <= 16 ? log : wp_exp2s ((log + 4) * 64);
 }
 
 //////////////// 8-bit unsigned versions /////////////////
@@ -409,7 +409,7 @@ int restore_weight (signed char weight)
 {
     int result;
 
-    if ((result = (int) weight << 3) > 0)
+    if ((result = (int) weight * 8) > 0)
         result += (result + 64) >> 7;
 
     return result;

@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
-//                           **** WAVPACK ****                            //
-//                  Hybrid Lossless Wavefile Compressor                   //
-//              Copyright (c) 1998 - 2013 Conifer Software.               //
+//                       **** WAVPACK-STREAM ****                         //
+//                      Streaming Audio Compressor                        //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -40,6 +40,8 @@ uint32_t WavpackStreamUnpackSamples (WavpackContext *wpc, int32_t *buffer, uint3
     int num_channels = wpc->config.num_channels, file_done = FALSE;
     uint32_t bcount, samples_unpacked = 0, samples_to_unpack;
     int32_t *bptr = buffer;
+
+    memset (buffer, 0, num_channels * samples * sizeof (int32_t));
 
     while (samples) {
 
@@ -134,15 +136,15 @@ uint32_t WavpackStreamUnpackSamples (WavpackContext *wpc, int32_t *buffer, uint3
         // to stereo), then enter this conditional block...otherwise we just unpack the samples directly
 
         if (!wpc->reduced_channels && !(wps->wphdr.flags & FINAL_BLOCK)) {
-            int32_t *temp_buffer = malloc (samples_to_unpack * 8), *src, *dst;
+            int32_t *temp_buffer = (int32_t *)calloc (1, samples_to_unpack * 8), *src, *dst;
             int offset = 0;     // offset to next channel in sequence (0 to num_channels - 1)
             uint32_t samcnt;
 
             // since we are getting samples from multiple bocks in a multichannel sequence, we must
             // allocate a temporary buffer to unpack to so that we can re-interleave the samples
 
-	    if (!temp_buffer)
-		break;
+            if (!temp_buffer)
+                break;
 
             // loop through all the streams...
 
@@ -154,12 +156,12 @@ uint32_t WavpackStreamUnpackSamples (WavpackContext *wpc, int32_t *buffer, uint3
                     wpc->streams = realloc (wpc->streams, (wpc->num_streams + 1) * sizeof (wpc->streams [0]));
 
                     if (!wpc->streams)
-			break;
+                        break;
 
                     wps = wpc->streams [wpc->num_streams++] = malloc (sizeof (WavpackStream));
 
                     if (!wps)
-			break;
+                        break;
 
                     CLEAR (*wps);
                     bcount = read_next_header (wpc->reader, wpc->wv_in, &wps->wphdr);
@@ -174,7 +176,7 @@ uint32_t WavpackStreamUnpackSamples (WavpackContext *wpc, int32_t *buffer, uint3
                     wps->blockbuff = malloc (wps->wphdr.ckSize + CHUNK_SIZE_OFFSET);
 
                     if (!wps->blockbuff)
-		        break;
+                        break;
 
                     memcpy (wps->blockbuff, &wps->wphdr, sizeof (WavpackHeader));
 

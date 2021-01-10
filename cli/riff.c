@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
 //                           **** WAVPACK ****                            //
 //                  Hybrid Lossless Wavefile Compressor                   //
-//                Copyright (c) 1998 - 2016 David Bryant.                 //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -126,13 +126,13 @@ int ParseRiffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpack
 
         if (!strncmp (chunk_header.ckID, "ds64", 4)) {
             if (chunk_header.ckSize < sizeof (DS64Chunk) ||
-                !DoReadFile (infile, &ds64_chunk, chunk_header.ckSize, &bcount) ||
-                bcount != chunk_header.ckSize) {
+                !DoReadFile (infile, &ds64_chunk, sizeof (DS64Chunk), &bcount) ||
+                bcount != sizeof (DS64Chunk)) {
                     error_line ("%s is not a valid .WAV file!", infilename);
                     return WAVPACK_SOFT_ERROR;
             }
             else if (!(config->qmode & QMODE_NO_STORE_WRAPPER) &&
-                !WavpackStreamAddWrapper (wpc, &ds64_chunk, chunk_header.ckSize)) {
+                !WavpackStreamAddWrapper (wpc, &ds64_chunk, sizeof (DS64Chunk))) {
                     error_line ("%s", WavpackStreamGetErrorMessage (wpc));
                     return WAVPACK_SOFT_ERROR;
             }
@@ -253,6 +253,8 @@ int ParseRiffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpack
                         config->float_norm_exp = 127 + 23;
                     else if (WaveHeader.BitsPerSample == 32)
                         config->float_norm_exp = 127 + 15;
+
+                    config->bits_per_sample = 32;   // make sure this is correct in Adobe modes
             }
 
             if (debug_logging_mode) {
@@ -283,8 +285,13 @@ int ParseRiffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpack
             }
 
             if (config->qmode & QMODE_IGNORE_LENGTH) {
-                if (infilesize && DoGetFilePosition (infile) != -1)
+                if (infilesize && DoGetFilePosition (infile) != -1) {
                     total_samples = (infilesize - DoGetFilePosition (infile)) / WaveHeader.BlockAlign;
+
+                    if ((infilesize - DoGetFilePosition (infile)) % WaveHeader.BlockAlign)
+                        error_line ("warning: audio length does not divide evenly, %d bytes will be discarded!",
+                            (int)((infilesize - DoGetFilePosition (infile)) % WaveHeader.BlockAlign));
+                }
                 else
                     total_samples = -1;
             }
@@ -413,24 +420,24 @@ int WriteRiffHeader (FILE *outfile, WavpackContext *wpc, int64_t total_samples, 
         wavhdr.GUID [13] = 0x71;
     }
 
-    strncpy (riffhdr.ckID, do_rf64 ? "RF64" : "RIFF", sizeof (riffhdr.ckID));
-    strncpy (riffhdr.formType, "WAVE", sizeof (riffhdr.formType));
+    memcpy (riffhdr.ckID, do_rf64 ? "RF64" : "RIFF", sizeof (riffhdr.ckID));
+    memcpy (riffhdr.formType, "WAVE", sizeof (riffhdr.formType));
     total_riff_bytes = sizeof (riffhdr) + wavhdrsize + sizeof (datahdr) + ((total_data_bytes + 1) & ~(int64_t)1);
     if (do_rf64) total_riff_bytes += sizeof (ds64hdr) + sizeof (ds64_chunk);
     if (write_junk) total_riff_bytes += sizeof (junkchunk);
-    strncpy (fmthdr.ckID, "fmt ", sizeof (fmthdr.ckID));
-    strncpy (datahdr.ckID, "data", sizeof (datahdr.ckID));
+    memcpy (fmthdr.ckID, "fmt ", sizeof (fmthdr.ckID));
+    memcpy (datahdr.ckID, "data", sizeof (datahdr.ckID));
     fmthdr.ckSize = wavhdrsize;
 
     if (write_junk) {
         CLEAR (junkchunk);
-        strncpy (junkchunk.ckID, "junk", sizeof (junkchunk.ckID));
+        memcpy (junkchunk.ckID, "junk", sizeof (junkchunk.ckID));
         junkchunk.ckSize = sizeof (junkchunk) - 8;
         WavpackStreamNativeToLittleEndian (&junkchunk, ChunkHeaderFormat);
     }
 
     if (do_rf64) {
-        strncpy (ds64hdr.ckID, "ds64", sizeof (ds64hdr.ckID));
+        memcpy (ds64hdr.ckID, "ds64", sizeof (ds64hdr.ckID));
         ds64hdr.ckSize = sizeof (ds64_chunk);
         CLEAR (ds64_chunk);
         ds64_chunk.riffSize64 = total_riff_bytes;

@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
-//                           **** WAVPACK ****                            //
-//                  Hybrid Lossless Wavefile Compressor                   //
-//              Copyright (c) 1998 - 2013 Conifer Software.               //
+//                       **** WAVPACK-STREAM ****                         //
+//                      Streaming Audio Compressor                        //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -244,7 +244,7 @@ WavpackContext *WavpackStreamOpenFileInput (const char *infilename, char *error,
         return NULL;
     }
 
-    if (wv_id != stdin && (flags & OPEN_WVC)) {
+    if (*infilename != '-' && (flags & OPEN_WVC)) {
         char *in2filename = malloc (strlen (infilename) + 10);
 
         strcpy (in2filename, infilename);

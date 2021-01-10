@@ -101,6 +101,7 @@ AS_IF([test "x$enable_asm" != "xno"],[
   AS_CASE([$host_cpu],
     [i386|i486|i586|i686|i786], [AC_DEFINE([OPT_ASM_X86]) asm_selected=x86],
     [x86_64], [AC_DEFINE([OPT_ASM_X64]) asm_selected=x64],
+    [arm64*], [AS_IF([test "x$enable_asm" = "xyes"],[AC_MSG_ERROR(no assembly code for CPU $host_cpu)])],
     [arm*], [AC_DEFINE([OPT_ASM_ARM]) asm_selected=arm],
     [AS_IF([test "x$enable_asm" = "xyes"],[AC_MSG_ERROR(no assembly code for CPU $host_cpu)])]
   )
@@ -131,7 +132,7 @@ fi
 
 AC_ARG_ENABLE(man,
               [AC_HELP_STRING([--enable-man],
-                              [regenerate man pages from Docbook [default=no]])],enable_man=yes,
+                              [regenerate man pages from Docbook [default=no]])],enable_man=$enableval,
               enable_man=no)
 
 if test "${enable_man}" != no; then

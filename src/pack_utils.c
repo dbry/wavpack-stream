@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
-//                           **** WAVPACK ****                            //
-//                  Hybrid Lossless Wavefile Compressor                   //
-//              Copyright (c) 1998 - 2013 Conifer Software.               //
+//                       **** WAVPACK-STREAM ****                         //
+//                      Streaming Audio Compressor                        //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -129,7 +129,7 @@ void WavpackStreamSetFileInformation (WavpackContext *wpc, char *file_extension,
 //
 // The identities are provided in a NULL-terminated string (0x00 is not an allowed
 // channel ID). The Microsoft channels may be provided as well (and will be checked)
-// but it is really only neccessary to provide the "unknown" channels. Any truly
+// but it is really only necessary to provide the "unknown" channels. Any truly
 // unknown channels are indicated with a 0xFF.
 //
 // The channel IDs so far reserved are listed here:
@@ -194,6 +194,26 @@ int WavpackStreamSetConfiguration64 (WavpackContext *wpc, WavpackStreamConfig *c
     int num_chans = config->num_channels;
     int i;
 
+    if (config->sample_rate <= 0) {
+        strcpy (wpc->error_message, "sample rate cannot be zero or negative!");
+        return FALSE;
+    }
+
+    if (num_chans <= 0 || num_chans > NEW_MAX_STREAMS * 2) {
+        strcpy (wpc->error_message, "invalid channel count!");
+        return FALSE;
+    }
+
+    if (config->block_samples && (config->block_samples < 50 || config->block_samples > 8000)) {
+        strcpy (wpc->error_message, "invalid custom block samples!");
+        return FALSE;
+    }
+
+    if (config->block_bytes && (config->block_bytes < 256 || config->block_bytes > 16384)) {
+        strcpy (wpc->error_message, "invalid custom block bytes!");
+        return FALSE;
+    }
+
     if ((config->qmode & QMODE_DSD_AUDIO) && config->bytes_per_sample == 1 && config->bits_per_sample == 8) {
 #ifdef ENABLE_DSD
         wpc->dsd_multiplier = 1;
@@ -256,12 +276,28 @@ int WavpackStreamSetConfiguration64 (WavpackContext *wpc, WavpackStreamConfig *c
 
     if (!(flags & DSD_FLAG)) {
         if (config->float_norm_exp) {
+            if (config->bytes_per_sample != 4 || config->bits_per_sample != 32) {
+                strcpy (wpc->error_message, "incorrect bits/bytes configuration for float data!");
+                return FALSE;
+            }
+
             wpc->config.float_norm_exp = config->float_norm_exp;
             wpc->config.flags |= CONFIG_FLOAT_DATA;
             flags |= FLOAT_DATA;
         }
-        else
+        else {
+            if (config->bytes_per_sample < 1 || config->bytes_per_sample > 4) {
+                strcpy (wpc->error_message, "invalid bytes per sample!");
+                return FALSE;
+            }
+
+            if (config->bits_per_sample < 1 || config->bits_per_sample > config->bytes_per_sample * 8) {
+                strcpy (wpc->error_message, "invalid bits per sample!");
+                return FALSE;
+            }
+
             flags |= ((config->bytes_per_sample * 8) - config->bits_per_sample) << SHIFT_LSB;
+        }
 
         if (config->block_bytes && (config->float_norm_exp || config->bits_per_sample > 24)) {
             strcpy (wpc->error_message, "block-bytes not available for > 24-bit audio!");
@@ -316,8 +352,8 @@ int WavpackStreamSetConfiguration64 (WavpackContext *wpc, WavpackStreamConfig *c
         // skip past channels that are specified in the channel mask (no reason to store those)
 
         while (*chan_ids)
-            if (*chan_ids <= 32 && *chan_ids > lastchan && (mask_copy & (1 << (*chan_ids-1)))) {
-                mask_copy &= ~(1 << (*chan_ids-1));
+            if (*chan_ids <= 32 && *chan_ids > lastchan && (mask_copy & (1U << (*chan_ids-1)))) {
+                mask_copy &= ~(1U << (*chan_ids-1));
                 lastchan = *chan_ids++;
             }
             else
@@ -349,13 +385,13 @@ int WavpackStreamSetConfiguration64 (WavpackContext *wpc, WavpackStreamConfig *c
         // if there are any bits [still] set in the channel_mask, get the next one or two IDs from there
         if (chan_mask)
             for (pos = 0; pos < 32; ++pos)
-                if (chan_mask & (1 << pos)) {
+                if (chan_mask & (1U << pos)) {
                     if (left_chan_id) {
                         right_chan_id = pos + 1;
                         break;
                     }
                     else {
-                        chan_mask &= ~(1 << pos);
+                        chan_mask &= ~(1U << pos);
                         left_chan_id = pos + 1;
                     }
                 }
@@ -383,8 +419,8 @@ int WavpackStreamSetConfiguration64 (WavpackContext *wpc, WavpackStreamConfig *c
                 for (i = 0; i < NUM_STEREO_PAIRS; ++i)
                     if ((left_chan_id == stereo_pairs [i].a && right_chan_id == stereo_pairs [i].b) ||
                         (left_chan_id == stereo_pairs [i].b && right_chan_id == stereo_pairs [i].a)) {
-                            if (right_chan_id <= 32 && (chan_mask & (1 << (right_chan_id-1))))
-                                chan_mask &= ~(1 << (right_chan_id-1));
+                            if (right_chan_id <= 32 && (chan_mask & (1U << (right_chan_id-1))))
+                                chan_mask &= ~(1U << (right_chan_id-1));
                             else if (chan_ids && *chan_ids == right_chan_id)
                                 chan_ids++;
 
@@ -517,7 +553,7 @@ int WavpackStreamPackInit (WavpackContext *wpc)
 
     wpc->block_samples = sample_rate / divisor;
 
-    while (wpc->block_samples > 8000 || wpc->block_samples * wpc->config.num_channels > 25000)
+    while (wpc->block_samples > 8000 || (int64_t) wpc->block_samples * wpc->config.num_channels > 25000)
         wpc->block_samples /= 2;
 
     while (wpc->block_samples < 256)
@@ -605,7 +641,7 @@ int WavpackStreamPackSamples (WavpackContext *wpc, int32_t *sample_buffer, uint3
 
                     case 3:
                         while (cnt--) {
-                            *dptr++ = (*sptr << 8) >> 8;
+                            *dptr++ = (int32_t)((uint32_t)*sptr << 8) >> 8;
                             sptr += nch;
                         }
 
@@ -642,8 +678,8 @@ int WavpackStreamPackSamples (WavpackContext *wpc, int32_t *sample_buffer, uint3
 
                     case 3:
                         while (cnt--) {
-                            *dptr++ = (sptr [0] << 8) >> 8;
-                            *dptr++ = (sptr [1] << 8) >> 8;
+                            *dptr++ = (int32_t)((uint32_t)sptr [0] << 8) >> 8;
+                            *dptr++ = (int32_t)((uint32_t)sptr [1] << 8) >> 8;
                             sptr += nch;
                         }
 
@@ -787,6 +823,7 @@ static int pack_streams (WavpackContext *wpc, uint32_t block_samples)
         max_blocksize += max_blocksize >> 2;    // otherwise 25% margin for everything else
 
     max_blocksize += wpc->metabytes + 1024;     // finally, add metadata & another 1K margin
+    max_blocksize += max_blocksize & 1;         // and make sure it's even so we detect overflow
 
     if (max_blocksize > 16384 || (wpc->config.block_bytes && wpc->config.block_bytes < max_blocksize)) {
         if (wpc->config.block_bytes && wpc->config.block_bytes < max_blocksize)
@@ -821,7 +858,7 @@ static int pack_streams (WavpackContext *wpc, uint32_t block_samples)
         }
 
         flags &= ~MAG_MASK;
-        flags += (1 << MAG_LSB) * ((flags & BYTES_STORED) * 8 + 7);
+        flags += (1U << MAG_LSB) * ((flags & BYTES_STORED) * 8 + 7);
 
         wps->wphdr.block_samples = block_samples;
         wps->wphdr.flags = flags;

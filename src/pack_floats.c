@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
-//                           **** WAVPACK ****                            //
-//                  Hybrid Lossless Wavefile Compressor                   //
-//              Copyright (c) 1998 - 2013 Conifer Software.               //
+//                       **** WAVPACK-STREAM ****                         //
+//                      Streaming Audio Compressor                        //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -202,7 +202,7 @@ int scan_float_data (WavpackStream *wps, f32 *values, int32_t num_values)
 // significant bits shifted out of the integers, plus information about +/- zeros and exceptions
 // like NaN and +/- infinities) into the wvxbits stream (which is assumed to be opened). Note that
 // for this work correctly, scan_float_data() must have been called on the original data to set
-// the appropiate flags in float_flags and max_exp.
+// the appropriate flags in float_flags and max_exp.
 
 void send_float_data (WavpackStream *wps, f32 *values, int32_t num_values)
 {

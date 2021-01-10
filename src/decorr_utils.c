@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
-//                           **** WAVPACK ****                            //
-//                  Hybrid Lossless Wavefile Compressor                   //
-//              Copyright (c) 1998 - 2013 Conifer Software.               //
+//                       **** WAVPACK-STREAM ****                         //
+//                      Streaming Audio Compressor                        //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -130,7 +130,7 @@ int read_decorr_combined (WavpackStream *wps, WavpackMetadata *wpmd)
 
     for (i = 0; i < termcnt; i++)
         if (i & 1)
-            expanded_data [i] = *byteptr++ << 4;
+            expanded_data [i] = *byteptr++ * 16;
         else
             expanded_data [i] = *byteptr;
 

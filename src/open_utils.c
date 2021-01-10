@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
 //                           **** WAVPACK ****                            //
 //                  Hybrid Lossless Wavefile Compressor                   //
-//                Copyright (c) 1998 - 2016 David Bryant.                 //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -458,9 +458,9 @@ static int read_config_info (WavpackContext *wpc, WavpackMetadata *wpmd)
 
     if (bytecnt >= 3) {
         wpc->config.flags &= 0xff;
-        wpc->config.flags |= (int32_t) *byteptr++ << 8;
-        wpc->config.flags |= (int32_t) *byteptr++ << 16;
-        wpc->config.flags |= (int32_t) *byteptr++ << 24;
+        wpc->config.flags |= (uint32_t) *byteptr++ << 8;
+        wpc->config.flags |= (uint32_t) *byteptr++ << 16;
+        wpc->config.flags |= (uint32_t) *byteptr++ << 24;
         bytecnt -= 3;
 
         if (bytecnt && (wpc->config.flags & CONFIG_EXTRA_MODE)) {
@@ -508,7 +508,7 @@ static int read_new_config_info (WavpackContext *wpc, WavpackMetadata *wpmd)
         if (bytecnt) {
             int nchans, i;
 
-            wpc->channel_layout = (int32_t) *byteptr++ << 16;
+            wpc->channel_layout = (uint32_t) *byteptr++ << 16;
             bytecnt--;
 
             // another byte means we have a channel count for the layout and maybe a reordering
@@ -637,8 +637,8 @@ static int read_wrapper_data (WavpackContext *wpc, WavpackMetadata *wpmd)
 {
     if ((wpc->open_flags & OPEN_WRAPPER) && wpc->wrapper_bytes < MAX_WRAPPER_BYTES && wpmd->byte_length) {
         wpc->wrapper_data = realloc (wpc->wrapper_data, wpc->wrapper_bytes + wpmd->byte_length);
-	if (!wpc->wrapper_data)
-	    return FALSE;
+        if (!wpc->wrapper_data)
+            return FALSE;
         memcpy (wpc->wrapper_data + wpc->wrapper_bytes, wpmd->data, wpmd->byte_length);
         wpc->wrapper_bytes += wpmd->byte_length;
     }
@@ -978,8 +978,8 @@ int read_wvc_block (WavpackContext *wpc)
 
         if (!compare_result) {
             wps->block2buff = malloc (wphdr.ckSize + CHUNK_SIZE_OFFSET);
-	    if (!wps->block2buff)
-	        return FALSE;
+            if (!wps->block2buff)
+                return FALSE;
 
             if (wpc->reader->read_bytes (wpc->wvc_in, wps->block2buff + sizeof (WavpackHeader), wphdr.ckSize - CHUNK_SIZE_REMAINDER) !=
                 wphdr.ckSize - CHUNK_SIZE_REMAINDER) {
@@ -1237,13 +1237,13 @@ int WavpackStreamVerifySingleBlock (unsigned char *buffer, int verify_checksum)
 #endif
 
             if (meta_bc == 4) {
-                if (*dp++ != (csum & 0xff) || *dp++ != ((csum >> 8) & 0xff) || *dp++ != ((csum >> 16) & 0xff) || *dp++ != ((csum >> 24) & 0xff))
+                if (*dp != (csum & 0xff) || dp[1] != ((csum >> 8) & 0xff) || dp[2] != ((csum >> 16) & 0xff) || dp[3] != ((csum >> 24) & 0xff))
                     return FALSE;
             }
             else {
                 csum ^= csum >> 16;
 
-                if (*dp++ != (csum & 0xff) || *dp++ != ((csum >> 8) & 0xff))
+                if (*dp != (csum & 0xff) || dp[1] != ((csum >> 8) & 0xff))
                     return FALSE;
             }
 

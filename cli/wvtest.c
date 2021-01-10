@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
 //                       **** WAVPACK-STREAM ****                         //
 //                      Streaming Audio Compressor                        //
-//                Copyright (c) 1998 - 2018 David Bryant.                 //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -676,7 +676,7 @@ static int run_test (int wpconfig_flags, int test_flags, int bits, int num_chans
             }
         }
 
-	if (!WavpackStreamPackSamples (out_wpc, (int32_t *) destin, ENCODE_SAMPLES))
+        if (!WavpackStreamPackSamples (out_wpc, (int32_t *) destin, ENCODE_SAMPLES))
             printf ("...PackSamples() returned FALSE\n");
 
         store_samples (destin, (int32_t *) destin, 0, wpconfig.bytes_per_sample, ENCODE_SAMPLES * num_chans);
@@ -890,7 +890,7 @@ static int write_block (void *id, void *data, int32_t length)
     unsigned char *data_ptr = data;
 
     if (!ws || !data || !length)
-	return 0;
+        return 0;
 
     if (ws->fuzz_period)
         fuzz_buffer (data, length, ws->fuzz_period);
@@ -1207,7 +1207,7 @@ static void float_to_integer_samples (float *samples, int num_samples, int bits)
         else
             isample = floor (*samples * scalar);
 
-        *(int32_t *)samples = isample << ishift;
+        *(int32_t *)samples = (uint32_t) isample << ishift;
         samples++;
     } 
 }
@@ -1234,10 +1234,7 @@ static void float_to_32bit_integer_samples (float *samples, int num_samples)
                 tzeros++;
 
             while (tzeros--)
-                if (frandom() > 0.5)
-                    isample = (isample << 1) + 1;
-                else
-                    isample <<= 1;
+                isample = ((unsigned int) isample << 1) + ((frandom() > 0.5) ? 1 : 0);
         }
 
         *(int32_t *)samples = isample;

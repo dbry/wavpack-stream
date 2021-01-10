@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
 //                           **** WAVPACK ****                            //
 //                  Hybrid Lossless Wavefile Compressor                   //
-//                Copyright (c) 1998 - 2016 David Bryant.                 //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -152,7 +152,7 @@ static struct {
 
 int ParseCaffHeaderConfig (FILE *infile, char *infilename, char *fourcc, WavpackContext *wpc, WavpackStreamConfig *config)
 {
-    uint32_t chan_chunk = 0, channel_layout = 0, bcount;
+    uint32_t chan_chunk = 0, desc_chunk = 0, channel_layout = 0, bcount;
     unsigned char *channel_identities = NULL;
     unsigned char *channel_reorder = NULL;
     int64_t total_samples = 0, infilesize;
@@ -218,6 +218,7 @@ int ParseCaffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpack
             }
 
             WavpackStreamBigEndianToNative (&caf_audio_format, CAFAudioFormatFormat);
+            desc_chunk = 1;
 
             if (debug_logging_mode) {
                 char formatstr [5];
@@ -458,7 +459,7 @@ int ParseCaffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpack
         else if (!strncmp (caf_chunk_header.mChunkType, "data", 4)) {     // on the data chunk, get size and exit loop
             uint32_t mEditCount;
 
-            if (!DoReadFile (infile, &mEditCount, sizeof (mEditCount), &bcount) ||
+            if (!desc_chunk || !DoReadFile (infile, &mEditCount, sizeof (mEditCount), &bcount) ||
                 bcount != sizeof (mEditCount)) {
                     error_line ("%s is not a valid .CAF file!", infilename);
                     return WAVPACK_SOFT_ERROR;
@@ -472,8 +473,13 @@ int ParseCaffHeaderConfig (FILE *infile, char *infilename, char *fourcc, Wavpack
             if ((config->qmode & QMODE_IGNORE_LENGTH) || caf_chunk_header.mChunkSize == -1) {
                 config->qmode |= QMODE_IGNORE_LENGTH;
 
-                if (infilesize && DoGetFilePosition (infile) != -1)
+                if (infilesize && DoGetFilePosition (infile) != -1) {
                     total_samples = (infilesize - DoGetFilePosition (infile)) / caf_audio_format.mBytesPerPacket;
+
+                    if ((infilesize - DoGetFilePosition (infile)) % caf_audio_format.mBytesPerPacket)
+                        error_line ("warning: audio length does not divide evenly, %d bytes will be discarded!",
+                            (int)((infilesize - DoGetFilePosition (infile)) % caf_audio_format.mBytesPerPacket));
+                }
                 else
                     total_samples = -1;
             }
@@ -591,7 +597,7 @@ int WriteCaffHeader (FILE *outfile, WavpackContext *wpc, int64_t total_samples, 
 
     // format and write the CAF File Header
 
-    strncpy (caf_file_header.mFileType, "caff", sizeof (caf_file_header.mFileType));
+    memcpy (caf_file_header.mFileType, "caff", sizeof (caf_file_header.mFileType));
     caf_file_header.mFileVersion = 1;
     caf_file_header.mFileFlags = 0;
     WavpackStreamNativeToBigEndian (&caf_file_header, CAFFileHeaderFormat);
@@ -602,7 +608,7 @@ int WriteCaffHeader (FILE *outfile, WavpackContext *wpc, int64_t total_samples, 
 
     // format and write the Audio Description Chunk
 
-    strncpy (caf_desc_chunk_header.mChunkType, "desc", sizeof (caf_desc_chunk_header.mChunkType));
+    memcpy (caf_desc_chunk_header.mChunkType, "desc", sizeof (caf_desc_chunk_header.mChunkType));
     caf_desc_chunk_header.mChunkSize = sizeof (caf_audio_format);
     WavpackStreamNativeToBigEndian (&caf_desc_chunk_header, CAFChunkHeaderFormat);
 
@@ -611,7 +617,7 @@ int WriteCaffHeader (FILE *outfile, WavpackContext *wpc, int64_t total_samples, 
             return FALSE;
 
     caf_audio_format.mSampleRate = (double) sample_rate;
-    strncpy (caf_audio_format.mFormatID, "lpcm", sizeof (caf_audio_format.mFormatID));
+    memcpy (caf_audio_format.mFormatID, "lpcm", sizeof (caf_audio_format.mFormatID));
     caf_audio_format.mFormatFlags = float_norm_exp ? CAF_FORMAT_FLOAT : 0;
 
     if (!(qmode & QMODE_BIG_ENDIAN))
@@ -633,7 +639,7 @@ int WriteCaffHeader (FILE *outfile, WavpackContext *wpc, int64_t total_samples, 
     // 3. there are 1 or 2 channels and NOT regular mono/stereo
 
     if (channel_layout_tag || (num_channels > 2 ? num_identified_chans : channel_mask != 5 - num_channels)) {
-        int bits = 0, bmask;
+        unsigned int bits = 0, bmask;
 
         for (bmask = 1; bmask; bmask <<= 1)     // count the set bits in the channel mask
             if (bmask & channel_mask)
@@ -645,7 +651,7 @@ int WriteCaffHeader (FILE *outfile, WavpackContext *wpc, int64_t total_samples, 
 
         if ((channel_layout_tag & 0xff0000) || (bits == num_channels && !(qmode & QMODE_REORDERED_CHANS))) {
 
-            strncpy (caf_chan_chunk_header.mChunkType, "chan", sizeof (caf_chan_chunk_header.mChunkType));
+            memcpy (caf_chan_chunk_header.mChunkType, "chan", sizeof (caf_chan_chunk_header.mChunkType));
             caf_chan_chunk_header.mChunkSize = sizeof (caf_channel_layout);
             WavpackStreamNativeToBigEndian (&caf_chan_chunk_header, CAFChunkHeaderFormat);
 
@@ -695,7 +701,7 @@ int WriteCaffHeader (FILE *outfile, WavpackContext *wpc, int64_t total_samples, 
                 }
             }
 
-            strncpy (caf_chan_chunk_header.mChunkType, "chan", sizeof (caf_chan_chunk_header.mChunkType));
+            memcpy (caf_chan_chunk_header.mChunkType, "chan", sizeof (caf_chan_chunk_header.mChunkType));
             caf_chan_chunk_header.mChunkSize = sizeof (caf_channel_layout) + sizeof (caf_channel_description) * num_channels;
             WavpackStreamNativeToBigEndian (&caf_chan_chunk_header, CAFChunkHeaderFormat);
 
@@ -738,7 +744,7 @@ int WriteCaffHeader (FILE *outfile, WavpackContext *wpc, int64_t total_samples, 
 
     // format and write the Audio Data Chunk
 
-    strncpy (caf_data_chunk_header.mChunkType, "data", sizeof (caf_data_chunk_header.mChunkType));
+    memcpy (caf_data_chunk_header.mChunkType, "data", sizeof (caf_data_chunk_header.mChunkType));
 
     if (total_samples == -1)
         caf_data_chunk_header.mChunkSize = -1;

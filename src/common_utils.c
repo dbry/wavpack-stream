@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
-//                           **** WAVPACK ****                            //
-//                  Hybrid Lossless Wavefile Compressor                   //
-//              Copyright (c) 1998 - 2013 Conifer Software.               //
+//                       **** WAVPACK-STREAM ****                         //
+//                      Streaming Audio Compressor                        //
+//                Copyright (c) 1998 - 2020 David Bryant.                 //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -223,7 +223,7 @@ double WavpackStreamGetRatio (WavpackContext *wpc)
 
 double WavpackStreamGetAverageBitrate (WavpackContext *wpc, int count_wvc)
 {
-    if (wpc && wpc->total_samples != -1 && wpc->filelen) {
+    if (wpc && wpc->total_samples != -1 && wpc->filelen && WavpackStreamGetSampleRate (wpc)) {
         double output_time = (double) wpc->total_samples / WavpackStreamGetSampleRate (wpc);
         double input_size = (double) wpc->filelen + (count_wvc ? wpc->file2len : 0);
 
@@ -244,7 +244,7 @@ double WavpackStreamGetInstantBitrate (WavpackContext *wpc)
     if (wpc && wpc->stream3)
         return WavpackStreamGetAverageBitrate (wpc, TRUE);
 
-    if (wpc && wpc->streams && wpc->streams [0] && wpc->streams [0]->wphdr.block_samples) {
+    if (wpc && wpc->streams && wpc->streams [0] && wpc->streams [0]->wphdr.block_samples && WavpackStreamGetSampleRate (wpc)) {
         double output_time = (double) wpc->streams [0]->wphdr.block_samples / WavpackStreamGetSampleRate (wpc);
         double input_size = 0;
         int si;
@@ -448,11 +448,13 @@ int WavpackStreamGetChannelMask (WavpackContext *wpc)
 // Return the normalization value for floating point data (valid only
 // if floating point data is present). A value of 127 indicates that
 // the floating point range is +/- 1.0. Higher values indicate a
-// larger floating point range.
+// larger floating point range. Note that if the client specified
+// OPEN_NORMALIZE we return the normalized value (i.e., 127 + offset)
+// rather than what's in the file (which isn't really relevant).
 
 int WavpackStreamGetFloatNormExp (WavpackContext *wpc)
 {
-    return wpc->config.float_norm_exp;
+    return (wpc->open_flags & OPEN_NORMALIZE) ? 127 + wpc->norm_offset : wpc->config.float_norm_exp;
 }
 
 // Returns the actual number of valid bits per sample contained in the
@@ -493,7 +495,7 @@ int WavpackStreamGetReducedChannels (WavpackContext *wpc)
 }
 
 // Free all memory allocated for raw WavPack blocks (for all allocated streams)
-// and free all additonal streams. This does not free the default stream ([0])
+// and free all additional streams. This does not free the default stream ([0])
 // which is always kept around.
 
 void free_streams (WavpackContext *wpc)
@@ -522,31 +524,7 @@ void free_streams (WavpackContext *wpc)
         }
 
 #ifdef ENABLE_DSD
-        if (wpc->streams [si]->dsd.probabilities) {
-            free (wpc->streams [si]->dsd.probabilities);
-            wpc->streams [si]->dsd.probabilities = NULL;
-        }
-
-        if (wpc->streams [si]->dsd.summed_probabilities) {
-            free (wpc->streams [si]->dsd.summed_probabilities);
-            wpc->streams [si]->dsd.summed_probabilities = NULL;
-        }
-
-        if (wpc->streams [si]->dsd.value_lookup) {
-            int i;
-
-            for (i = 0; i < wpc->streams [si]->dsd.history_bins; ++i)
-                if (wpc->streams [si]->dsd.value_lookup [i])
-                    free (wpc->streams [si]->dsd.value_lookup [i]);
-
-            free (wpc->streams [si]->dsd.value_lookup);
-            wpc->streams [si]->dsd.value_lookup = NULL;
-        }
-
-        if (wpc->streams [si]->dsd.ptable) {
-            free (wpc->streams [si]->dsd.ptable);
-            wpc->streams [si]->dsd.ptable = NULL;
-        }
+        free_dsd_tables (wpc->streams [si]);
 #endif
 
         if (si) {
@@ -558,6 +536,36 @@ void free_streams (WavpackContext *wpc)
 
     wpc->current_stream = 0;
 }
+
+#ifdef ENABLE_DSD
+void free_dsd_tables (WavpackStream *wps)
+{
+    if (wps->dsd.probabilities) {
+        free (wps->dsd.probabilities);
+        wps->dsd.probabilities = NULL;
+    }
+
+    if (wps->dsd.summed_probabilities) {
+        free (wps->dsd.summed_probabilities);
+        wps->dsd.summed_probabilities = NULL;
+    }
+
+    if (wps->dsd.lookup_buffer) {
+        free (wps->dsd.lookup_buffer);
+        wps->dsd.lookup_buffer = NULL;
+    }
+
+    if (wps->dsd.value_lookup) {
+        free (wps->dsd.value_lookup);
+        wps->dsd.value_lookup = NULL;
+    }
+
+    if (wps->dsd.ptable) {
+        free (wps->dsd.ptable);
+        wps->dsd.ptable = NULL;
+    }
+}
+#endif
 
 void WavpackStreamFloatNormalize (int32_t *values, int32_t num_values, int delta_exp)
 {
@@ -590,13 +598,13 @@ void WavpackStreamLittleEndianToNative (void *data, char *format)
         switch (*format) {
             case 'D':
                 temp = cp [0] + ((int64_t) cp [1] << 8) + ((int64_t) cp [2] << 16) + ((int64_t) cp [3] << 24) +
-                    ((int64_t) cp [4] << 32) + ((int64_t) cp [5] << 40) + ((int64_t) cp [6] << 48) + ((int64_t) cp [7] << 56);
+                    ((int64_t) cp [4] << 32) + ((int64_t) cp [5] << 40) + ((int64_t) cp [6] << 48) + ((uint64_t) cp [7] << 56);
                 * (int64_t *) cp = temp;
                 cp += 8;
                 break;
 
             case 'L':
-                temp = cp [0] + ((int32_t) cp [1] << 8) + ((int32_t) cp [2] << 16) + ((int32_t) cp [3] << 24);
+                temp = cp [0] + ((int32_t) cp [1] << 8) + ((int32_t) cp [2] << 16) + ((int64_t) cp [3] << 24);
                 * (int32_t *) cp = (int32_t) temp;
                 cp += 4;
                 break;
@@ -671,13 +679,13 @@ void WavpackStreamBigEndianToNative (void *data, char *format)
         switch (*format) {
             case 'D':
                 temp = cp [7] + ((int64_t) cp [6] << 8) + ((int64_t) cp [5] << 16) + ((int64_t) cp [4] << 24) +
-                    ((int64_t) cp [3] << 32) + ((int64_t) cp [2] << 40) + ((int64_t) cp [1] << 48) + ((int64_t) cp [0] << 56);
+                    ((int64_t) cp [3] << 32) + ((int64_t) cp [2] << 40) + ((int64_t) cp [1] << 48) + ((uint64_t) cp [0] << 56);
                 * (int64_t *) cp = temp;
                 cp += 8;
                 break;
 
             case 'L':
-                temp = cp [3] + ((int32_t) cp [2] << 8) + ((int32_t) cp [1] << 16) + ((int32_t) cp [0] << 24);
+                temp = cp [3] + ((int32_t) cp [2] << 8) + ((int32_t) cp [1] << 16) + ((int64_t) cp [0] << 24);
                 * (int32_t *) cp = (int32_t) temp;
                 cp += 4;
                 break;
