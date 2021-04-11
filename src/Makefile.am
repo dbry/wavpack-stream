@@ -42,7 +42,7 @@ noinst_HEADERS = \
 	wavpack_local.h \
 	wavpack_version.h
 
-libwavpack_stream_la_CFLAGS = $(AM_CFLAGS)
+libwavpack_stream_la_CFLAGS = $(AM_CFLAGS) -I$(top_srcdir)/include
 libwavpack_stream_la_LIBADD = $(AM_LDADD) $(LIBM)
 libwavpack_stream_la_LDFLAGS = -version-info $(LT_CURRENT):$(LT_REVISION):$(LT_AGE) -export-symbols-regex '^WavpackStream.*$$' -no-undefined
 

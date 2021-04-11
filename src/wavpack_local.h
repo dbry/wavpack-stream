@@ -11,6 +11,8 @@
 #ifndef WAVPACK_LOCAL_H
 #define WAVPACK_LOCAL_H
 
+#include "wavpack-stream.h"
+
 #if defined(_WIN32)
 #define strdup(x) _strdup(x)
 #define FASTCALL __fastcall
@@ -78,13 +80,14 @@ typedef int32_t f32;
 
 ////////////////////////////// WavPack Header /////////////////////////////////
 
-// Note that this is the ONLY structure that is written to (or read from)
-// WavPack 4.0 files, and is the preamble to every block in both the .wv
-// and .wvc files.
+// Note that this is the ONLY structure that is included in wavpack-stream
+// data, and is stored little-endian. It is the preamble to every block in both
+// main and correction streams.
 
 typedef struct {
     char ckID [4];
-    uint16_t ckSize, block_samples;
+    uint16_t ckSize;
+    uint16_t block_samples;
     uint32_t flags;
 } WavpackHeader;
 
@@ -182,70 +185,15 @@ typedef struct {
 #define ID_AUDIO_CHECKSUM       (ID_OPTIONAL_DATA | 0x11)
 #define ID_AUDIO_CHECKSUM_WVX   (ID_OPTIONAL_DATA | 0x12)
 
-///////////////////////// WavPack Configuration ///////////////////////////////
-
-// This internal structure is used during encode to provide configuration to
-// the encoding engine and during decoding to provide fle information back to
-// the higher level functions. Not all fields are used in both modes.
-
-typedef struct {
-    float bitrate, shaping_weight;
-    int bits_per_sample, bytes_per_sample;
-    int qmode, flags, xmode, num_channels, float_norm_exp;
-    int32_t block_samples, block_bytes, extra_flags, sample_rate, channel_mask;
-    unsigned char md5_checksum [16], md5_read;
-} WavpackStreamConfig;
-
-#define CONFIG_BYTES_STORED     3       // 1-4 bytes/sample
-#define CONFIG_MONO_FLAG        4       // not stereo
-#define CONFIG_HYBRID_FLAG      8       // hybrid mode
-#define CONFIG_JOINT_STEREO     0x10    // joint stereo
-#define CONFIG_CROSS_DECORR     0x20    // no-delay cross decorrelation
-#define CONFIG_HYBRID_SHAPE     0x40    // noise shape (hybrid mode only)
-#define CONFIG_FLOAT_DATA       0x80    // ieee 32-bit floating point data
-
-#define CONFIG_FAST_FLAG        0x200   // fast mode
-#define CONFIG_HIGH_FLAG        0x800   // high quality mode
-#define CONFIG_VERY_HIGH_FLAG   0x1000  // very high
-#define CONFIG_BITRATE_KBPS     0x2000  // bitrate is kbps, not bits / sample
-#define CONFIG_AUTO_SHAPING     0x4000  // automatic noise shaping
-#define CONFIG_SHAPE_OVERRIDE   0x8000  // shaping mode specified
-#define CONFIG_JOINT_OVERRIDE   0x10000 // joint-stereo mode specified
-#define CONFIG_DYNAMIC_SHAPING  0x20000 // dynamic noise shaping
-#define CONFIG_CREATE_EXE       0x40000 // create executable
-#define CONFIG_CREATE_WVC       0x80000 // create correction file
-#define CONFIG_OPTIMIZE_WVC     0x100000 // maximize bybrid compression
-#define CONFIG_COMPATIBLE_WRITE 0x400000 // write files for decoders < 4.3
-#define CONFIG_CALC_NOISE       0x800000 // calc noise in hybrid mode
-#define CONFIG_LOSSY_MODE       0x1000000 // obsolete (for information)
-#define CONFIG_EXTRA_MODE       0x2000000 // extra processing mode
-#define CONFIG_SKIP_WVX         0x4000000 // no wvx stream w/ floats & big ints
-#define CONFIG_MD5_CHECKSUM     0x8000000 // compute & store MD5 signature
-#define CONFIG_PAIR_UNDEF_CHANS 0x20000000 // encode undefined channels in stereo pairs
-#define CONFIG_OPTIMIZE_MONO    0x80000000 // optimize for mono streams posing as stereo
-
-#define QMODE_DSD_AUDIO         0x30    // if either of these is set in qmode (version 5.0)
-
 /*
- * These config flags were never actually used, or are no longer used, or are
- * used for something else now. They may be used in the future for what they
- * say, or for something else. WavPack files in the wild *may* have some of
- * these bit set in their config flags (with these older meanings), but only
- * if the stream version is 0x410 or less than 0x407. Of course, this is not
- * very important because once the file has been encoded, the config bits are
- * just for information purposes (i.e., they do not affect decoding),
- *
-#define CONFIG_ADOBE_MODE       0x100   // "adobe" mode for 32-bit floats
-#define CONFIG_VERY_FAST_FLAG   0x400   // double fast
-#define CONFIG_COPY_TIME        0x20000 // copy file-time from source
-#define CONFIG_QUALITY_MODE     0x200000 // psychoacoustic quality mode
-#define CONFIG_RAW_FLAG         0x400000 // raw mode (not implemented yet)
-#define CONFIG_QUIET_MODE       0x10000000 // don't report progress %
-#define CONFIG_MERGE_BLOCKS     0x10000000 // merge blocks of equal redundancy (for lossyWAV)
-#define CONFIG_IGNORE_LENGTH    0x20000000 // ignore length in wav header
-#define CONFIG_NEW_RIFF_HEADER  0x40000000 // generate new RIFF wav header
- *
+ * These config flags are not actually used for external configuration, which is
+ * why they're not in the external wavpacks-stream.h file, but they are used
+ * internally in the flags field of the WavpackConfig struct.
  */
+
+#define CONFIG_LOSSY_MODE       0x1000000 // obsolete (for information)
+#define CONFIG_FLOAT_DATA       0x80    // ieee 32-bit floating point data
+#define CONFIG_AUTO_SHAPING     0x4000  // automatic noise shaping
 
 #define EXTRA_SCAN_ONLY         1
 #define EXTRA_STEREO_MODES      2
@@ -371,42 +319,7 @@ typedef struct {
 
 /////////////////////////////// WavPack Context ///////////////////////////////
 
-// This internal structure holds everything required to encode or decode WavPack
-// files. It is recommended that direct access to this structure be minimized
-// and the provided utilities used instead.
-
-typedef struct {
-    int32_t (*read_bytes)(void *id, void *data, int32_t bcount);
-    uint32_t (*get_pos)(void *id);
-    int (*set_pos_abs)(void *id, uint32_t pos);
-    int (*set_pos_rel)(void *id, int32_t delta, int mode);
-    int (*push_back_byte)(void *id, int c);
-    uint32_t (*get_length)(void *id);
-    int (*can_seek)(void *id);
-
-    // this callback is for writing edited tags only
-    int32_t (*write_bytes)(void *id, void *data, int32_t bcount);
-} WavpackReader;
-
-// Extended version of structure for handling large files and added
-// functionality for truncating and closing files
-
-typedef struct {
-    int32_t (*read_bytes)(void *id, void *data, int32_t bcount);
-    int32_t (*write_bytes)(void *id, void *data, int32_t bcount);
-    int64_t (*get_pos)(void *id);                               // new signature for large files
-    int (*set_pos_abs)(void *id, int64_t pos);                  // new signature for large files
-    int (*set_pos_rel)(void *id, int64_t delta, int mode);      // new signature for large files
-    int (*push_back_byte)(void *id, int c);
-    int64_t (*get_length)(void *id);                            // new signature for large files
-    int (*can_seek)(void *id);
-    int (*truncate_here)(void *id);                             // new function to truncate file at current position
-    int (*close)(void *id);                                     // new function to close file
-} WavpackReader64;
-
-typedef int (*WavpackBlockOutput)(void *id, void *data, int32_t bcount);
-
-typedef struct {
+struct WavpackContext {
     WavpackStreamConfig config;
 
     WavpackMetadata *metadata;
@@ -440,7 +353,7 @@ typedef struct {
 
     void (*close_callback)(void *wpc);
     char error_message [80];
-} WavpackContext;
+};
 
 //////////////////////// function prototypes and macros //////////////////////
 
@@ -722,19 +635,6 @@ WavpackContext *WavpackStreamOpenFileInput (const char *infilename, char *error,
 #define OPEN_NO_CHECKSUM 0x800  // don't verify block checksums before decoding
 
 int WavpackStreamGetMode (WavpackContext *wpc);
-
-#define MODE_WVC        0x1
-#define MODE_LOSSLESS   0x2
-#define MODE_HYBRID     0x4
-#define MODE_FLOAT      0x8
-#define MODE_HIGH       0x20
-#define MODE_FAST       0x40
-#define MODE_EXTRA      0x80    // extra mode used, see MODE_XMODE for possible level
-#define MODE_SFX        0x200
-#define MODE_VERY_HIGH  0x400
-#define MODE_MD5        0x800
-#define MODE_XMODE      0x7000  // mask for extra level (1-6, 0=unknown)
-#define MODE_DNS        0x8000
 
 int WavpackStreamGetQualifyMode (WavpackContext *wpc);
 int WavpackStreamGetVersion (WavpackContext *wpc);
